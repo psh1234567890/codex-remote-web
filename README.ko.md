@@ -52,6 +52,47 @@ Get-Content .local/access-token
 
 ## 다른 기기에서 접속하기
 
+### 방법 A: 아이패드 Safari만 사용 (외부 Wi-Fi에서도 가능)
+
+아이패드에 앱을 설치할 수 없다면 이 방법을 사용하세요.
+**PC에는 Tailscale 설치 및 로그인**이 필요하지만 아이패드는 Safari만
+있으면 됩니다. Tailscale **Funnel**이 공개 HTTPS 주소를 만들고,
+Codex Remote Web의 별도 인증 게이트웨이가 접근을 통제합니다.
+
+PC의 프로젝트 폴더에서 다음 명령을 실행합니다.
+
+```powershell
+.\scripts\start-safari.cmd
+```
+
+이 실행기는 로컬 Codex 서비스(4765)와 인증 게이트웨이(4776)를
+PC 내부에만 바인딩하고, 공개 HTTPS 포트 **10000**만 게이트웨이로
+연결합니다. 기존 443/8443 설정은 바꾸지 않습니다.
+
+**Safari 연결 순서**
+
+1. PC에서 `npm.cmd run remote:code`로 **10분 유효 일회용 연결 코드**를 발급합니다.
+2. 위 실행기가 출력한 `https://<PC 이름>.<Tailnet>.ts.net:10000/` 주소를 Safari에 입력합니다.
+3. 발급한 코드를 입력해 아이패드 Safari를 등록합니다. 앱 설치는 필요 없습니다.
+4. 이후에는 최대 **24시간 동안** 같은 Safari의 인증 쿠키로 접속할 수 있습니다. 만료되거나 PC 서버가 재시작되면 새 코드를 발급받습니다.
+
+비공개 Codex 접근 토큰은 PC에만 저장됩니다. Safari에는 해당 토큰을
+전송하지 않으며, 인증 쿠키는 `Secure`, `HttpOnly`, `SameSite=Strict`
+속성을 사용합니다. 연결 코드는 PC에서만 발급하고 **절대 공유하지 마세요.**
+인증 게이트웨이는 공개 URL에서 접근할 수 있으므로 사용하지 않을 때는
+PC에서 아래 명령으로 공개 접속을 종료하세요.
+
+```powershell
+& "C:\Program Files\Tailscale\tailscale.exe" funnel --https=10000 off
+```
+
+웹 공개 설정과 별개로, 기존 4765 서버는 계속 로컬에만 열립니다.
+외부에서 Codex를 조작하는 개인용 기능인 만큼 독립적인 보안 감사를
+받은 제품은 아니라는 점을 유의하세요. PC가 꺼져 있으면 사용할 수
+없으며, PC가 켜져 있어도 서버·Tailscale이 실행 중이어야 합니다.
+
+### 방법 B: Tailscale 앱을 설치할 수 있는 기기만 접속
+
 기본적으로 **같은 PC의 브라우저에서만** 접속할 수 있습니다.
 **아이패드 Safari에서는 Tailscale Serve(비공개 HTTPS)**를 사용합니다.
 Tailscale Funnel(인터넷 전체에 공개)과 다르며, 같은 Tailnet에 로그인한

@@ -29,6 +29,27 @@ guaranteed.
 
 ### Private iPad / Safari access
 
+**Browser-only Safari access from outside the home Wi-Fi:** on the PC, run
+`.\scripts\start-safari.cmd`. This creates an independently authenticated,
+loopback-only gateway and exposes **only the gateway** through Tailscale
+**Funnel** on HTTPS port **10000**, leaving any existing 443 and 8443 services
+unchanged. On the PC, generate a one-time pairing code using
+`npm.cmd run remote:code`. Enter that code into the printed URL on Safari.
+The code expires after 10 minutes and is consumed once. Approved browsers
+receive a secure, HttpOnly, SameSite=Strict cookie valid for at most 24 hours.
+Session registrations are stored in memory and vanish after gateway restart.
+The upstream Codex access token is never returned to the browser.
+To disable the public endpoint, run
+`tailscale funnel --https=10000 off` **on the PC**.
+
+**Security note:** A public HTTPS *login page* is exposed, not an unauthenticated
+Codex API. Anyone can visit the login page, but accessing the dashboard
+requires a PC-issued code. This prototype is not security audited, so do not
+share codes or expose the backend HTTP service. Consider stronger identity
+verification before long-term use.
+
+#### Private-only alternative
+
 Use **Tailscale Serve** (tailnet-only HTTPS), not Tailscale Funnel or a
 publicly forwarded HTTP port. Install and sign in to Tailscale on both
 Windows and iPadOS. On Windows, run:

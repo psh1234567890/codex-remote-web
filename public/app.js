@@ -1,4 +1,5 @@
 const $ = (id) => document.getElementById(id);
+const remoteMode = window.location.pathname === "/app";
 const state = {
   token: sessionStorage.getItem("codex-remote-token") ?? "",
   selectedThread: null,
@@ -38,7 +39,8 @@ function toast(message) {
 }
 
 async function api(path, options = {}) {
-  const headers = { Authorization: `Bearer ${state.token}` };
+  const headers = remoteMode ? {} : { Authorization: `Bearer ${state.token}` };
+  if (remoteMode && (options.method ?? "GET") === "POST") headers["X-Remote-Client"] = "1";
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   const response = await fetch("/api" + path, {
     method: options.method ?? "GET",
@@ -55,6 +57,12 @@ async function api(path, options = {}) {
 }
 
 function disconnect() {
+  if (remoteMode) {
+    state.streamAbort?.abort();
+    void fetch("/remote-api/logout", { method: "POST", credentials: "same-origin" })
+      .finally(() => window.location.replace("/"));
+    return;
+  }
   state.streamAbort?.abort();
   state.streamAbort = null;
   state.token = "";
@@ -474,7 +482,7 @@ async function listenEvents() {
   while (!controller.signal.aborted) {
     try {
       const response = await fetch("/api/events", {
-        headers: { Authorization: `Bearer ${state.token}` },
+        headers: remoteMode ? {} : { Authorization: `Bearer ${state.token}` },
         signal: controller.signal,
         cache: "no-store",
       });
@@ -553,4 +561,8 @@ $("prompt").addEventListener("keydown", (event) => {
     $("composer").requestSubmit();
   }
 });
-if (state.token) connect().catch(() => disconnect());
+if (remoteMode) {
+  connect().catch(() => window.location.replace("/"));
+} else if (state.token) {
+  connect().catch(() => disconnect());
+}
