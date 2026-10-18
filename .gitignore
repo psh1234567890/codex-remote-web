@@ -1,0 +1,13 @@
+node_modules/
+.local/
+.env
+.env.local
+.env.*.local
+*.log
+coverage/
+.DS_Store
+.idea/
+.vscode/
+*.pem
+*.key
+*.p12

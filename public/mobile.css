@@ -1,0 +1,49 @@
+@media (max-width:650px) {
+  .sidebar-top {
+    display: grid;
+    grid-template-columns: minmax(0,1fr) auto;
+    gap: 5px 9px;
+    padding: 10px 13px 0;
+  }
+  .brand-row { grid-column: 1; margin-bottom: 0; }
+  .workspace-select-wrap {
+    grid-column: 1 / -1;
+    display: flex;
+    padding: 0 8px;
+  }
+  .workspace-select-wrap select { padding: 7px 0; }
+  .new-thread {
+    grid-column: 2;
+    display: inline-flex;
+    width: auto;
+    margin: 0;
+    padding: 7px 10px;
+    font-size: 10px;
+  }
+  .new-arrow { display: none; }
+}
+
+/* Approval prompts must stay visible even when the desktop activity rail collapses. */
+@media (max-width:1120px) {
+  .activity-panel:has(.approval-card) {
+    display: block;
+    position: fixed;
+    z-index: 25;
+    right: 12px;
+    bottom: 12px;
+    width: min(360px, calc(100vw - 24px));
+    max-height: 75dvh;
+    overflow: auto;
+    padding: 16px;
+    border: 1px solid #745d36;
+    border-radius: 14px;
+    box-shadow: 0 16px 65px #000b;
+  }
+  .activity-panel:has(.approval-card) .activity-header,
+  .activity-panel:has(.approval-card) .activity-subtitle,
+  .activity-panel:has(.approval-card) .activity-divider,
+  .activity-panel:has(.approval-card) .activity-list,
+  .activity-panel:has(.approval-card) .activity-footer {
+    display: none;
+  }
+}

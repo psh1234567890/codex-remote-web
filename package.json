@@ -1,0 +1,20 @@
+{
+  "name": "codex-remote-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A self-hosted, local-first web companion for Codex app-server.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server/index.mjs",
+    "dev": "node --watch server/index.mjs",
+    "test": "node --test test/*.test.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "check": "node --check server/index.mjs && node --check server/bridge.mjs && node --check public/app.js"
+  },
+  "dependencies": {
+    "@openai/codex": "0.163.0"
+  }
+}
