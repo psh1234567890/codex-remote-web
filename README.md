@@ -27,6 +27,32 @@ and platform-specific Korean fallbacks. No proprietary font files, official
 logos, or copied app assets are included. Pixel-perfect visual parity is not
 guaranteed.
 
+### Private iPad / Safari access
+
+Use **Tailscale Serve** (tailnet-only HTTPS), not Tailscale Funnel or a
+publicly forwarded HTTP port. Install and sign in to Tailscale on both
+Windows and iPadOS. On Windows, run:
+
+```powershell
+.\scripts\start-tailnet.cmd -Workspaces "C:\projects\my-app"
+```
+
+The `.cmd` launcher uses a process-scoped PowerShell execution-policy bypass
+because some Windows installations block unsigned local scripts; it does not
+modify the machine-wide execution policy.
+For repeated use, save one absolute workspace path per line in the ignored
+`.local/tailnet-workspaces.txt` file, then run `.\scripts\start-tailnet.cmd`
+without arguments. An explicit `-Workspaces` argument takes precedence.
+
+The script checks that Tailscale is running, refuses to use a port exposed
+through Funnel, preserves existing Serve services, and configures a private
+HTTPS listener on port 8443 for the loopback-only Node server. Open the
+printed `https://<machine>.<tailnet>.ts.net:8443/` URL in Safari while
+connected to the same tailnet. Enter the existing access token from the
+Windows PC's `.local/access-token` file. Never put the token in a URL.
+The PC and Node server must remain running; review Tailscale ACLs to restrict
+which devices can reach the service.
+
 ## Quick start (Windows PowerShell)
 
 Prerequisites: Node.js 22+, npm, and a Codex CLI login with an eligible account.

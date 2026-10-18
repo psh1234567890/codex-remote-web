@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import http from "node:http";
 import { createServer } from "../server/index.mjs";
 
 class FakeBridge extends EventEmitter {
@@ -34,13 +35,14 @@ class FakeBridge extends EventEmitter {
 
 const secret = "a".repeat(64);
 
-async function setup() {
+async function setup({ trustedHosts = [] } = {}) {
   const cwd = process.cwd();
   const bridge = new FakeBridge(cwd);
   const server = createServer({
     bridge,
     accessToken: secret,
     workspaces: [{ id: "0", name: "test", path: cwd }],
+    trustedHosts,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const url = `http://127.0.0.1:${server.address().port}`;
@@ -63,6 +65,23 @@ test("private endpoints require a token; static app is accessible", async () => 
     assert.equal(allowed.status, 200);
     const data = await allowed.json();
     assert.deepEqual(data.threads.map((item) => item.id), ["allowed-thread"]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("private HTTPS proxy hostname must be explicitly trusted", async () => {
+  const app = await setup({ trustedHosts: ["my-pc.example.ts.net"] });
+  const requestWithHost = (host) => new Promise((resolve, reject) => {
+    const url = new URL(app.url);
+    http.get({ hostname: url.hostname, port: url.port, path: "/api/health", headers: { Host: host } }, (response) => {
+      response.resume();
+      response.on("end", () => resolve(response.statusCode));
+    }).on("error", reject);
+  });
+  try {
+    assert.equal(await requestWithHost("my-pc.example.ts.net:8443"), 200);
+    assert.equal(await requestWithHost("untrusted.example.ts.net:8443"), 421);
   } finally {
     await app.close();
   }

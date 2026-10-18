@@ -7,6 +7,9 @@ Treat access to this dashboard as access to your development machine.
 - A randomly generated access token is required for all private endpoints.
 - The token is stored in `.local/access-token` (gitignored), never in source control.
 - Use a trusted **HTTPS private network** solution for access from other devices.
+- `scripts/start-tailnet.ps1` uses Tailscale **Serve** on port 8443 and
+  explicitly refuses a Tailscale **Funnel** configuration for that endpoint.
+  Restrict tailnet access using Tailscale ACLs and only enroll trusted devices.
 - **Never** expose the HTTP port directly to the internet or put the token in a URL.
 - Approvals require an explicit click and are never automatically accepted.
 - This project does not expose a generic shell, file reader, or arbitrary JSON-RPC endpoint.

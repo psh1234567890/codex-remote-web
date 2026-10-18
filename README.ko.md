@@ -53,8 +53,36 @@ Get-Content .local/access-token
 ## 다른 기기에서 접속하기
 
 기본적으로 **같은 PC의 브라우저에서만** 접속할 수 있습니다.
-다른 기기에서 접속하려면 개인용 HTTPS 네트워크와 접근 제어가 필요합니다.
-라우터 포트 포워딩이나 공개 인터넷 터널에 그대로 연결하지 마세요.
+**아이패드 Safari에서는 Tailscale Serve(비공개 HTTPS)**를 사용합니다.
+Tailscale Funnel(인터넷 전체에 공개)과 다르며, 같은 Tailnet에 로그인한
+기기만 접속할 수 있습니다. PC와 아이패드에 Tailscale을 설치하고
+같은 계정/Tailnet에 로그인한 뒤, PC에서 실행합니다.
+
+```powershell
+# 필요하면 허용할 프로젝트 경로를 지정하세요.
+.\scripts\start-tailnet.cmd -Workspaces "C:\projects\my-app"
+```
+
+Windows에서 PowerShell 스크립트 실행이 차단될 수 있으므로
+`.cmd` 실행 파일을 제공합니다. 이 파일은 **해당 실행 프로세스에서만**
+PowerShell 실행 정책을 우회하며 시스템 전체 정책을 변경하지 않습니다.
+자주 쓰는 작업 폴더는 Git에서 제외되는
+`.local/tailnet-workspaces.txt`에 한 줄씩 저장할 수 있습니다.
+이 파일이 있으면 다음부터 `.\scripts\start-tailnet.cmd`만 실행해도
+동일한 작업 폴더를 사용할 수 있습니다.
+
+기본적으로 HTTPS 포트 8443을 사용하고, 기존 443 포트 설정을 변경하지
+않습니다. 출력된 `https://<PC의 Tailscale DNS 이름>:8443/` 주소를
+아이패드 Safari에 입력하세요. 로그인에는 PC의
+`.local/access-token` 파일에 있는 접근 토큰이 별도로 필요합니다.
+토큰을 링크, 채팅 또는 GitHub에 붙여넣지 마세요.
+PC를 재시작했다면 서버를 다시 실행해야 합니다.
+
+이 방식은 Node 서버를 `127.0.0.1`에만 바인딩하며 Tailscale Serve가
+HTTPS를 제공합니다. PC가 켜져 있고 Codex Remote Web이 실행 중이어야
+아이패드에서도 접속할 수 있습니다. Tailscale의 기기 접근 권한(ACL)도
+본인 기기로 제한하세요. 라우터 포트 포워딩이나 공개 인터넷 터널에
+Codex Remote Web을 직접 연결하지 마세요.
 
 ## 현재 제한
 
