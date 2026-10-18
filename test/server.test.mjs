@@ -53,6 +53,10 @@ test("private endpoints require a token; static app is accessible", async () => 
     const home = await fetch(app.url + "/");
     assert.equal(home.status, 200);
     assert.match(await home.text(), /Codex Remote Web/);
+    const stylesheet = await fetch(app.url + "/codex.css");
+    assert.equal(stylesheet.status, 200);
+    assert.match(await stylesheet.text(), /--sidebar: #1b2023/);
+    assert.equal((await fetch(app.url + "/style.css")).status, 404);
     assert.equal((await fetch(app.url + "/api/threads")).status, 401);
     assert.equal((await fetch(app.url + "/api/threads", { headers: { Authorization: "Bearer wrong" } })).status, 401);
     const allowed = await fetch(app.url + "/api/threads", { headers: { Authorization: `Bearer ${secret}` } });

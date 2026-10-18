@@ -15,6 +15,17 @@
 - Interrupt an active turn.
 - Token authentication, loopback-only server, strict Host checks, no CORS.
 - No remote shell endpoint, cloud database, tracking, or analytics.
+- Codex-inspired dark interface with project-grouped sessions, message bubbles,
+  a compact activity inspector, and safe basic Markdown rendering.
+
+### Visual design and fonts
+
+The interface is independently implemented using the desktop Codex layout as a
+visual reference. It uses a system font stack, preferring `OpenAI Sans` **only
+if it is already installed**, then `Segoe UI Variable Text`, `Segoe UI`,
+and platform-specific Korean fallbacks. No proprietary font files, official
+logos, or copied app assets are included. Pixel-perfect visual parity is not
+guaranteed.
 
 ## Quick start (Windows PowerShell)
 

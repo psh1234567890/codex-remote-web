@@ -12,6 +12,16 @@ const state = {
   streamAbort: null,
 };
 
+function iconNode(name) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", "#i-" + name);
+  svg.append(use);
+  return svg;
+}
+
 function node(tag, className, text) {
   const element = document.createElement(tag);
   if (className) element.className = className;
@@ -61,6 +71,8 @@ function connection(ready) {
   $("connection-detail").textContent = state.codexReady ? "app-server online" : "앱 서버 상태 확인 필요";
   $("new-thread").disabled = !state.codexReady;
   $("welcome-new").disabled = !state.codexReady;
+  $("rail-new").disabled = !state.codexReady;
+  document.querySelector(".sidebar-new").disabled = !state.codexReady;
 }
 
 function shortDate(value) {
@@ -80,13 +92,26 @@ function renderThreads() {
     container.append(node("p", "empty-small", "아직 이 작업 폴더에 기록된 대화가 없어요."));
     return;
   }
+  const groups = new Map();
   for (const thread of state.threads) {
-    const item = node("button", "thread-item" + (state.selectedThread === thread.id ? " active" : ""));
-    item.type = "button";
-    item.append(node("span", "thread-item-title", threadName(thread)));
-    item.append(node("span", "thread-item-date", shortDate(thread.updatedAt ?? thread.createdAt) || "Saved session"));
-    item.addEventListener("click", () => selectThread(thread.id));
-    container.append(item);
+    const name = thread.cwd?.split(/[\\/]/).filter(Boolean).at(-1) || "다른 대화";
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(thread);
+  }
+  for (const [name, threads] of groups) {
+    const group = node("div", "thread-group");
+    const label = node("div", "thread-group-label");
+    label.append(iconNode("folder"), node("span", "", name));
+    group.append(label);
+    for (const thread of threads) {
+      const item = node("button", "thread-item" + (state.selectedThread === thread.id ? " active" : ""));
+      item.type = "button";
+      item.append(node("span", "thread-item-title", threadName(thread)));
+      item.append(node("span", "thread-item-date", shortDate(thread.updatedAt ?? thread.createdAt) || "저장된 대화"));
+      item.addEventListener("click", () => selectThread(thread.id));
+      group.append(item);
+    }
+    container.append(group);
   }
 }
 
@@ -104,13 +129,132 @@ function renderWorkspaces() {
     option.value = workspace.id;
     select.append(option);
   }
+  updateWorkspaceLabel();
+}
+
+function updateWorkspaceLabel() {
+  const workspace = state.workspaces.find((item) => item.id === $("workspace-select").value);
+  $("composer-workspace-name").textContent = workspace?.name ?? "프로젝트";
+}
+
+// Render a deliberately small Markdown subset using DOM nodes, never innerHTML.
+// Agent responses are untrusted text; links are limited to HTTP(S) URLs.
+function appendInlineMarkdown(parent, source) {
+  const pattern = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|\*[^*\n]+\*)/g;
+  let cursor = 0;
+  for (const match of source.matchAll(pattern)) {
+    if (match.index > cursor) parent.append(document.createTextNode(source.slice(cursor, match.index)));
+    const value = match[0];
+    if (value.startsWith("**")) {
+      const strong = node("strong");
+      appendInlineMarkdown(strong, value.slice(2, -2));
+      parent.append(strong);
+    } else if (value.startsWith("`")) {
+      parent.append(node("code", "", value.slice(1, -1)));
+    } else if (value.startsWith("[")) {
+      const end = value.indexOf("](");
+      const link = node("a", "", value.slice(1, end));
+      link.href = value.slice(end + 2, -1);
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      parent.append(link);
+    } else {
+      const emphasis = node("em");
+      appendInlineMarkdown(emphasis, value.slice(1, -1));
+      parent.append(emphasis);
+    }
+    cursor = match.index + value.length;
+  }
+  if (cursor < source.length) parent.append(document.createTextNode(source.slice(cursor)));
+}
+
+function renderMarkdown(parent, markdown) {
+  const lines = String(markdown).replace(/\r\n/g, "\n").split("\n");
+  let paragraph = [];
+  let list = null;
+  let listType = "";
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    const p = node("p");
+    appendInlineMarkdown(p, paragraph.join("\n"));
+    parent.append(p);
+    paragraph = [];
+  };
+  const closeList = () => { list = null; listType = ""; };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*```/.test(line)) {
+      flushParagraph();
+      closeList();
+      const codeLines = [];
+      for (i++; i < lines.length && !/^\s*```/.test(lines[i]); i++) codeLines.push(lines[i]);
+      const pre = node("pre");
+      pre.append(node("code", "", codeLines.join("\n")));
+      parent.append(pre);
+      continue;
+    }
+    if (!line.trim()) {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+    if (heading) {
+      flushParagraph();
+      closeList();
+      const h = node("h" + Math.min(heading[1].length + 2, 6));
+      appendInlineMarkdown(h, heading[2]);
+      parent.append(h);
+      continue;
+    }
+    const bullet = /^\s{0,3}([-*]|\d+\.)\s+(.+)$/.exec(line);
+    if (bullet) {
+      flushParagraph();
+      const kind = /^\d/.test(bullet[1]) ? "ol" : "ul";
+      if (!list || listType !== kind) {
+        list = node(kind);
+        listType = kind;
+        parent.append(list);
+      }
+      const li = node("li");
+      appendInlineMarkdown(li, bullet[2]);
+      list.append(li);
+      continue;
+    }
+    if (/^>\s?/.test(line)) {
+      flushParagraph();
+      closeList();
+      const quote = node("blockquote");
+      appendInlineMarkdown(quote, line.replace(/^>\s?/, ""));
+      parent.append(quote);
+      continue;
+    }
+    closeList();
+    paragraph.push(line);
+  }
+  flushParagraph();
+}
+
+function showWelcome() {
+  state.selectedThread = null;
+  state.activeTurn = null;
+  state.liveText = "";
+  $("empty-view").classList.remove("hidden");
+  $("conversation").classList.add("hidden");
+  $("current-title").textContent = "새 채팅";
+  $("nav-home").classList.add("selected");
+  renderThreads();
+  renderActive();
 }
 
 function appendMessage(container, role, text) {
   if (!text || !String(text).trim()) return;
   const block = node("article", "message " + role);
   block.append(node("div", "message-label", role === "user" ? "YOU" : role === "command" ? "CODEX · ACTION" : "CODEX"));
-  block.append(node("div", "message-body", text));
+  const body = node("div", "message-body");
+  if (role === "agent") renderMarkdown(body, text);
+  else body.textContent = text;
+  block.append(body);
   container.append(block);
 }
 
@@ -121,9 +265,11 @@ function textFromUserItem(item) {
 function renderConversation(thread) {
   $("empty-view").classList.add("hidden");
   $("conversation").classList.remove("hidden");
+  $("nav-home").classList.remove("selected");
   $("thread-title").textContent = threadName(thread);
   $("current-title").textContent = threadName(thread);
   $("thread-meta").textContent = [thread.cwd?.split(/[\\/]/).pop(), shortDate(thread.createdAt)].filter(Boolean).join("  ·  ");
+  $("composer-workspace-name").textContent = thread.cwd?.split(/[\\/]/).pop() || "프로젝트";
   const container = $("messages");
   container.replaceChildren();
   for (const turn of thread.turns ?? []) {
@@ -271,6 +417,7 @@ function onEvent(kind, data) {
   if (kind === "approval") {
     state.approvals.push(data);
     renderApprovals();
+    if (window.matchMedia("(max-width: 1150px)").matches) setActivityOpen(true);
     addActivity("승인 요청 도착", data.command?.slice(0, 100) ?? "파일 변경");
     return;
   }
@@ -310,6 +457,13 @@ function onEvent(kind, data) {
     addActivity("작업 종료", params.turn?.status ?? "완료");
     void loadThreads().catch(() => {});
   }
+}
+
+function setActivityOpen(open) {
+  $("dashboard").classList.toggle("activity-open", open);
+  $("dashboard").classList.toggle("activity-closed", !open);
+  $("activity-toggle").setAttribute("aria-expanded", String(open));
+  $("rail-activity").setAttribute("aria-expanded", String(open));
 }
 
 async function listenEvents() {
@@ -358,6 +512,7 @@ async function connect() {
   const session = await api("/session");
   $("login").classList.add("hidden");
   $("dashboard").classList.remove("hidden");
+  setActivityOpen(!window.matchMedia("(max-width: 1150px)").matches);
   connection(session.codexReady);
   const [workspaces, approvals] = await Promise.all([api("/workspaces"), api("/approvals")]);
   state.workspaces = workspaces.workspaces;
@@ -381,6 +536,12 @@ $("login-form").addEventListener("submit", async (event) => {
   }
 });
 $("logout").addEventListener("click", disconnect);
+$("nav-home").addEventListener("click", showWelcome);
+$("rail-new").addEventListener("click", createThread);
+$("rail-activity").addEventListener("click", () => setActivityOpen(!$("dashboard").classList.contains("activity-open")));
+$("activity-toggle").addEventListener("click", () => setActivityOpen(!$("dashboard").classList.contains("activity-open")));
+$("activity-close").addEventListener("click", () => setActivityOpen(false));
+$("workspace-select").addEventListener("change", updateWorkspaceLabel);
 $("new-thread").addEventListener("click", createThread);
 $("welcome-new").addEventListener("click", createThread);
 $("refresh-threads").addEventListener("click", () => loadThreads().catch((error) => toast(error.message)));
