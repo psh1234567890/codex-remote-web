@@ -22,7 +22,7 @@ class FakeBridge extends EventEmitter {
       ] };
     }
     if (method === "thread/read") {
-      return { thread: { id: params.threadId, cwd: params.threadId === "allowed-thread" ? this.cwd : "/definitely-not-an-allowed-folder", turns: [] } };
+      return { thread: { id: params.threadId, cwd: ["allowed-thread", "new-thread"].includes(params.threadId) ? this.cwd : "/definitely-not-an-allowed-folder", turns: [] } };
     }
     if (method === "thread/turns/list") return { data: [] };
     if (method === "thread/start") return { thread: { id: "new-thread", cwd: params.cwd, turns: [] } };
@@ -136,14 +136,33 @@ test("new threads are confined to allowed workspaces", async () => {
     const allowed = await fetch(app.url + "/api/threads", { method: "POST", headers, body: JSON.stringify({ workspaceId: "0" }) });
     assert.equal(allowed.status, 201);
     assert.equal(app.bridge.calls.find((call) => call.method === "thread/start").params.sandbox, "workspace-write");
+    const newlyCreated = await fetch(app.url + "/api/threads/new-thread", { headers });
+    assert.equal(newlyCreated.status, 200, "new empty threads must open before they appear in thread/list");
     const existing = await fetch(app.url + "/api/threads/denied-thread", { headers });
     assert.equal(existing.status, 200, "saved external projects should be viewable");
     assert.equal((await existing.json()).thread.editable, false);
     assert.equal((await fetch(app.url + "/api/threads/not-listed-thread", { headers })).status, 404);
-    const mutation = await fetch(app.url + "/api/threads/denied-thread/messages", {
+    const readOnlyChat = await fetch(app.url + "/api/threads/denied-thread/messages", {
       method: "POST", headers, body: JSON.stringify({ text: "do not modify" }),
     });
-    assert.equal(mutation.status, 403, "unknown workspaces must remain read-only");
+    assert.equal(readOnlyChat.status, 202, "saved projects should support read-only chat");
+    const readOnlyTurn = app.bridge.calls.find(
+      (call) => call.method === "turn/start" && call.params.threadId === "denied-thread",
+    );
+    assert.equal(readOnlyTurn.params.sandbox, "read-only", "unknown projects must not grant write access");
+    assert.equal(readOnlyTurn.params.approvalPolicy, "never");
+    const writableChat = await fetch(app.url + "/api/threads/allowed-thread/messages", {
+      method: "POST", headers, body: JSON.stringify({ text: "test message" }),
+    });
+    assert.equal(writableChat.status, 202);
+    const writableTurn = app.bridge.calls.find(
+      (call) => call.method === "turn/start" && call.params.threadId === "allowed-thread",
+    );
+    assert.equal(writableTurn.params.sandbox, "workspace-write");
+    assert.equal(writableTurn.params.approvalPolicy, "on-request");
+    assert.equal((await fetch(app.url + "/api/threads/not-listed-thread/messages", {
+      method: "POST", headers, body: JSON.stringify({ text: "hi" }),
+    })).status, 404);
   } finally {
     await app.close();
   }

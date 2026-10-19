@@ -366,8 +366,50 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .composer-note { font-size: 11px; }
   .topbar { min-height: 52px; }
   .thread-item { min-height: 48px; }
+  /* iPad Safari can trap nested flex scrollers. Scroll the entire project
+     drawer instead of relying on an inner list to capture swipe gestures. */
+  .sidebar {
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    min-height: 0;
+  }
+  .sidebar-top { flex: 0 0 auto; }
+  .thread-list {
+    flex: 0 0 auto;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+    -webkit-overflow-scrolling: auto;
+    touch-action: pan-y;
+  }
+  .thread-group, .thread-group-label, .thread-item {
+    touch-action: pan-y;
+  }
+  .sidebar-bottom { flex: 0 0 auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar { transition: none; }
+}
+
+/* Also support iPads with a connected trackpad or keyboard: their primary
+   pointer may report fine even while the user scrolls the drawer by touch. */
+@media (hover: none), (any-pointer: coarse) {
+  .sidebar {
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
+  .thread-list {
+    flex: 0 0 auto;
+    height: auto;
+    overflow: visible;
+    max-height: none;
+  }
+  .thread-item, .thread-group { touch-action: pan-y; }
 }

@@ -294,12 +294,12 @@ function renderConversation(thread) {
   $("thread-meta").textContent = [thread.cwd?.split(/[\\/]/).pop(), shortDate(thread.createdAt)].filter(Boolean).join("  ·  ");
   $("composer-workspace-name").textContent = thread.cwd?.split(/[\\/]/).pop() || "프로젝트";
   state.selectedEditable = thread.editable === true;
-  $("prompt").disabled = !state.selectedEditable;
-  $("send").disabled = !state.selectedEditable;
-  $("prompt").placeholder = state.selectedEditable ? "Codex와 함께 작업하세요" : "이 프로젝트는 열람 전용입니다";
+  $("prompt").disabled = false;
+  $("send").disabled = false;
+  $("prompt").placeholder = state.selectedEditable ? "Codex와 함께 작업하세요" : "읽기 전용 채팅 · 파일 수정 불가";
   $("composer-note").textContent = state.selectedEditable
     ? "이 프로젝트는 원격 작업이 허용되어 있습니다. 일부 작업에는 승인이 필요합니다."
-    : "기존 대화를 열람 중입니다. 원격 작업을 하려면 PC에서 이 프로젝트를 허용 목록에 추가해야 합니다.";
+    : "읽기 전용 채팅이 가능합니다. 파일을 수정하려면 PC에서 프로젝트를 허용 목록에 추가해야 합니다.";
   const container = $("messages");
   container.replaceChildren();
   for (const turn of thread.turns ?? []) {
@@ -318,7 +318,7 @@ function renderConversation(thread) {
 }
 
 function renderActive() {
-  $("stop-turn").disabled = !state.activeTurn || !state.selectedEditable;
+  $("stop-turn").disabled = !state.activeTurn;
   const live = $("live-panel");
   live.classList.toggle("hidden", !state.activeTurn);
   $("live-text").textContent = state.liveText || "응답을 기다리는 중...";
@@ -362,7 +362,6 @@ async function createThread() {
 async function sendMessage(event) {
   event.preventDefault();
   if (!state.selectedThread) return toast("먼저 작업을 선택하세요.");
-  if (!state.selectedEditable) return toast("열람 전용 프로젝트입니다. PC에서 작업 폴더를 허용하세요.");
   const input = $("prompt");
   const text = input.value.trim();
   if (!text) return;
@@ -378,7 +377,7 @@ async function sendMessage(event) {
   } catch (error) {
     toast(error.message);
   } finally {
-    $("send").disabled = !state.selectedEditable;
+    $("send").disabled = false;
   }
 }
 

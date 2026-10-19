@@ -11,6 +11,13 @@
 - View Codex threads and their recent messages in a responsive web dashboard.
 - Browse saved Codex conversations across projects, with a **read-only** mode
   for conversations outside the explicit local workspace allowlist.
+- Send text messages in those read-only projects using a read-only Codex
+  sandbox with approval policy `never`; filesystem writes remain limited
+  to locally allowlisted workspaces.
+
+The standalone `node scripts/smoke-chat.mjs` check runs one real,
+read-only Codex turn in a temporary empty project, archives its test thread,
+and consumes a small amount of model usage. It is not part of automated CI.
 - Touch-friendly collapsible project drawer and searchable conversation list
   on tablets and phones.
 - Start a thread in an **explicitly allowed local workspace**.

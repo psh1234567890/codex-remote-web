@@ -107,6 +107,15 @@ export function createServer({
     }
     const thread = (await listSavedThreads()).find((item) => item.id === threadId);
     if (!thread) {
+      // A newly started empty thread can take a moment to appear in
+      // thread/list. Only permit our own already-loaded thread IDs here.
+      if (bridge.loadedThreads.has(threadId)) {
+        const response = await bridge.request("thread/read", { threadId, includeTurns: false });
+        if (response?.thread?.id === threadId &&
+            isAllowedWorkspace(response.thread.cwd, workspaces)) {
+          return { ...response.thread, editable: true };
+        }
+      }
       const error = new Error("Saved Codex thread not found");
       error.httpStatus = 404;
       throw error;
@@ -246,7 +255,13 @@ export function createServer({
       const messageMatch = /^\/api\/threads\/([^/]+)\/messages$/.exec(pathname);
       if (req.method === "POST" && messageMatch) {
         const threadId = messageMatch[1];
-        await assertAuthorizedThread(threadId);
+        // Existing projects may be discussed without granting filesystem writes.
+        // Only explicitly allowlisted workspaces retain workspace-write access.
+        const known = await assertKnownThread(threadId);
+        const current = await bridge.request("thread/read", { threadId, includeTurns: false });
+        if (!current?.thread || current.thread.cwd !== known.cwd) {
+          return respond(res, 403, { error: "Saved thread directory changed" });
+        }
         const body = await parseJson(req);
         if (typeof body.text !== "string" || !body.text.trim() || body.text.length > 12000) {
           return respond(res, 400, { error: "Message must contain 1–12,000 characters" });
@@ -255,7 +270,8 @@ export function createServer({
         const result = await bridge.request("turn/start", {
           threadId,
           input: [{ type: "text", text: body.text.trim() }],
-          approvalPolicy: "on-request",
+          approvalPolicy: known.editable ? "on-request" : "never",
+          sandbox: known.editable ? "workspace-write" : "read-only",
         });
         if (result?.turn?.id) bridge.activeTurns.set(threadId, result.turn.id);
         return respond(res, 202, result);
