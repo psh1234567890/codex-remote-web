@@ -22,8 +22,9 @@ class FakeBridge extends EventEmitter {
       ] };
     }
     if (method === "thread/read") {
-      return { thread: { id: params.threadId, cwd: params.threadId === "allowed-thread" ? this.cwd : "/not-allowed", turns: [] } };
+      return { thread: { id: params.threadId, cwd: params.threadId === "allowed-thread" ? this.cwd : "/definitely-not-an-allowed-folder", turns: [] } };
     }
+    if (method === "thread/turns/list") return { data: [] };
     if (method === "thread/start") return { thread: { id: "new-thread", cwd: params.cwd, turns: [] } };
     if (method === "thread/resume") return { thread: { id: params.threadId } };
     if (method === "turn/start") return { turn: { id: "new-turn" } };
@@ -54,7 +55,10 @@ test("private endpoints require a token; static app is accessible", async () => 
   try {
     const home = await fetch(app.url + "/");
     assert.equal(home.status, 200);
-    assert.match(await home.text(), /Codex Remote Web/);
+    const html = await home.text();
+    assert.match(html, /Codex Remote Web/);
+    assert.match(html, /id="sidebar-toggle"/);
+    assert.match(html, /id="thread-search"/);
     const stylesheet = await fetch(app.url + "/codex.css");
     assert.equal(stylesheet.status, 200);
     assert.match(await stylesheet.text(), /--sidebar: #1b2023/);
@@ -64,9 +68,45 @@ test("private endpoints require a token; static app is accessible", async () => 
     const allowed = await fetch(app.url + "/api/threads", { headers: { Authorization: `Bearer ${secret}` } });
     assert.equal(allowed.status, 200);
     const data = await allowed.json();
-    assert.deepEqual(data.threads.map((item) => item.id), ["allowed-thread"]);
+    assert.deepEqual(data.threads.map((item) => [item.id, item.editable]), [
+      ["allowed-thread", true],
+      ["denied-thread", false],
+    ]);
   } finally {
     await app.close();
+  }
+});
+
+test("saved projects are collected across paginated Codex thread lists", async () => {
+  const cwd = process.cwd();
+  const bridge = new FakeBridge(cwd);
+  const seen = [];
+  const original = bridge.request.bind(bridge);
+  bridge.request = async (method, params) => {
+    if (method !== "thread/list") return original(method, params);
+    seen.push(params.cursor ?? "first");
+    return params.cursor
+      ? { data: [{ id: "second-page-thread", cwd: "/archive", preview: "Old conversation" }] }
+      : { data: [{ id: "first-page-thread", cwd, preview: "Recent conversation" }], nextCursor: "next-page" };
+  };
+  const server = createServer({
+    bridge, accessToken: secret,
+    workspaces: [{ id: "0", name: "test", path: cwd }],
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/threads`, {
+      headers: { Authorization: `Bearer ${secret}` },
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.deepEqual(result.threads.map((item) => [item.id, item.editable]), [
+      ["first-page-thread", true],
+      ["second-page-thread", false],
+    ]);
+    assert.deepEqual(seen, ["first", "next-page"]);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 });
 
@@ -96,7 +136,14 @@ test("new threads are confined to allowed workspaces", async () => {
     const allowed = await fetch(app.url + "/api/threads", { method: "POST", headers, body: JSON.stringify({ workspaceId: "0" }) });
     assert.equal(allowed.status, 201);
     assert.equal(app.bridge.calls.find((call) => call.method === "thread/start").params.sandbox, "workspace-write");
-    assert.equal((await fetch(app.url + "/api/threads/denied-thread", { headers })).status, 403);
+    const existing = await fetch(app.url + "/api/threads/denied-thread", { headers });
+    assert.equal(existing.status, 200, "saved external projects should be viewable");
+    assert.equal((await existing.json()).thread.editable, false);
+    assert.equal((await fetch(app.url + "/api/threads/not-listed-thread", { headers })).status, 404);
+    const mutation = await fetch(app.url + "/api/threads/denied-thread/messages", {
+      method: "POST", headers, body: JSON.stringify({ text: "do not modify" }),
+    });
+    assert.equal(mutation.status, 403, "unknown workspaces must remain read-only");
   } finally {
     await app.close();
   }

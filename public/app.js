@@ -3,6 +3,7 @@ const remoteMode = window.location.pathname === "/app";
 const state = {
   token: sessionStorage.getItem("codex-remote-token") ?? "",
   selectedThread: null,
+  selectedEditable: false,
   threads: [],
   workspaces: [],
   approvals: [],
@@ -96,26 +97,32 @@ function threadName(thread) {
 function renderThreads() {
   const container = $("thread-list");
   container.replaceChildren();
-  if (!state.threads.length) {
-    container.append(node("p", "empty-small", "아직 이 작업 폴더에 기록된 대화가 없어요."));
+  const search = $("thread-search").value.trim().toLocaleLowerCase();
+  const visible = state.threads.filter((thread) => {
+    const name = thread.cwd?.split(/[\\/]/).filter(Boolean).at(-1) || "";
+    return !search || (name + " " + threadName(thread)).toLocaleLowerCase().includes(search);
+  });
+  if (!visible.length) {
+    container.append(node("p", "empty-small", search ? "일치하는 프로젝트나 대화가 없습니다." : "저장된 Codex 대화가 없습니다."));
     return;
   }
   const groups = new Map();
-  for (const thread of state.threads) {
-    const name = thread.cwd?.split(/[\\/]/).filter(Boolean).at(-1) || "다른 대화";
+  for (const thread of visible) {
+    const name = thread.cwd?.split(/[\\/]/).filter(Boolean).at(-1) || "경로 정보 없음";
     if (!groups.has(name)) groups.set(name, []);
     groups.get(name).push(thread);
   }
   for (const [name, threads] of groups) {
     const group = node("div", "thread-group");
     const label = node("div", "thread-group-label");
-    label.append(iconNode("folder"), node("span", "", name));
+    label.append(iconNode("folder"), node("span", "", name + " · " + threads.length));
     group.append(label);
     for (const thread of threads) {
       const item = node("button", "thread-item" + (state.selectedThread === thread.id ? " active" : ""));
       item.type = "button";
+      item.title = thread.editable ? threadName(thread) : threadName(thread) + " — 열람 전용";
       item.append(node("span", "thread-item-title", threadName(thread)));
-      item.append(node("span", "thread-item-date", shortDate(thread.updatedAt ?? thread.createdAt) || "저장된 대화"));
+      item.append(node("span", "thread-item-date", (thread.editable ? "작업 가능" : "열람 전용") + " · " + (shortDate(thread.updatedAt ?? thread.createdAt) || "저장된 대화")));
       item.addEventListener("click", () => selectThread(thread.id));
       group.append(item);
     }
@@ -127,6 +134,7 @@ async function loadThreads() {
   const result = await api("/threads");
   state.threads = result.threads ?? [];
   renderThreads();
+  $("thread-search").placeholder = "프로젝트 / 대화 검색 (" + state.threads.length + ")";
 }
 
 function renderWorkspaces() {
@@ -245,6 +253,7 @@ function renderMarkdown(parent, markdown) {
 
 function showWelcome() {
   state.selectedThread = null;
+  state.selectedEditable = false;
   state.activeTurn = null;
   state.liveText = "";
   $("empty-view").classList.remove("hidden");
@@ -253,6 +262,12 @@ function showWelcome() {
   $("nav-home").classList.add("selected");
   renderThreads();
   renderActive();
+  setSidebarOpen(false);
+}
+
+function setSidebarOpen(open) {
+  $("dashboard").classList.toggle("sidebar-open", open);
+  $("sidebar-toggle").setAttribute("aria-expanded", String(open));
 }
 
 function appendMessage(container, role, text) {
@@ -278,6 +293,13 @@ function renderConversation(thread) {
   $("current-title").textContent = threadName(thread);
   $("thread-meta").textContent = [thread.cwd?.split(/[\\/]/).pop(), shortDate(thread.createdAt)].filter(Boolean).join("  ·  ");
   $("composer-workspace-name").textContent = thread.cwd?.split(/[\\/]/).pop() || "프로젝트";
+  state.selectedEditable = thread.editable === true;
+  $("prompt").disabled = !state.selectedEditable;
+  $("send").disabled = !state.selectedEditable;
+  $("prompt").placeholder = state.selectedEditable ? "Codex와 함께 작업하세요" : "이 프로젝트는 열람 전용입니다";
+  $("composer-note").textContent = state.selectedEditable
+    ? "이 프로젝트는 원격 작업이 허용되어 있습니다. 일부 작업에는 승인이 필요합니다."
+    : "기존 대화를 열람 중입니다. 원격 작업을 하려면 PC에서 이 프로젝트를 허용 목록에 추가해야 합니다.";
   const container = $("messages");
   container.replaceChildren();
   for (const turn of thread.turns ?? []) {
@@ -296,7 +318,7 @@ function renderConversation(thread) {
 }
 
 function renderActive() {
-  $("stop-turn").disabled = !state.activeTurn;
+  $("stop-turn").disabled = !state.activeTurn || !state.selectedEditable;
   const live = $("live-panel");
   live.classList.toggle("hidden", !state.activeTurn);
   $("live-text").textContent = state.liveText || "응답을 기다리는 중...";
@@ -312,7 +334,11 @@ async function selectThread(id) {
     if (state.selectedThread !== id) return;
     state.activeTurn = result.activeTurnId;
     renderConversation(result.thread);
+    if (result.historyUnavailable) {
+      $("messages").prepend(node("p", "empty-small", "이전 대화 기록 일부를 불러오지 못했습니다. 잠시 후 다시 선택해 주세요."));
+    }
     renderActive();
+    setSidebarOpen(false);
   } catch (error) {
     toast(error.message);
   }
@@ -324,7 +350,7 @@ async function createThread() {
     const result = await api("/threads", { method: "POST", body: { workspaceId: $("workspace-select").value } });
     const id = result.thread?.id;
     if (!id) throw new Error("새 대화 ID를 받지 못했습니다.");
-    state.threads.unshift(result.thread);
+    state.threads.unshift({ ...result.thread, editable: true });
     await selectThread(id);
     $("prompt").focus();
     addActivity("새 작업 시작", threadName(result.thread));
@@ -336,6 +362,7 @@ async function createThread() {
 async function sendMessage(event) {
   event.preventDefault();
   if (!state.selectedThread) return toast("먼저 작업을 선택하세요.");
+  if (!state.selectedEditable) return toast("열람 전용 프로젝트입니다. PC에서 작업 폴더를 허용하세요.");
   const input = $("prompt");
   const text = input.value.trim();
   if (!text) return;
@@ -351,7 +378,7 @@ async function sendMessage(event) {
   } catch (error) {
     toast(error.message);
   } finally {
-    $("send").disabled = false;
+    $("send").disabled = !state.selectedEditable;
   }
 }
 
@@ -528,6 +555,9 @@ async function connect() {
   renderWorkspaces();
   renderApprovals();
   await loadThreads();
+  if (window.matchMedia("(pointer: coarse)").matches) {
+    document.querySelector(".composer-shortcut").textContent = "전송 버튼으로 메시지 보내기";
+  }
   addActivity("대시보드 연결", "인증된 개인 세션");
   void listenEvents();
 }
@@ -545,6 +575,12 @@ $("login-form").addEventListener("submit", async (event) => {
 });
 $("logout").addEventListener("click", disconnect);
 $("nav-home").addEventListener("click", showWelcome);
+$("sidebar-toggle").addEventListener("click", () => setSidebarOpen(!$("dashboard").classList.contains("sidebar-open")));
+$("sidebar-backdrop").addEventListener("click", () => setSidebarOpen(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setSidebarOpen(false);
+});
+$("thread-search").addEventListener("input", renderThreads);
 $("rail-new").addEventListener("click", createThread);
 $("rail-activity").addEventListener("click", () => setActivityOpen(!$("dashboard").classList.contains("activity-open")));
 $("activity-toggle").addEventListener("click", () => setActivityOpen(!$("dashboard").classList.contains("activity-open")));
@@ -556,7 +592,9 @@ $("refresh-threads").addEventListener("click", () => loadThreads().catch((error)
 $("composer").addEventListener("submit", sendMessage);
 $("stop-turn").addEventListener("click", stopTurn);
 $("prompt").addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+  // iPad's software keyboard must always be able to insert newlines.
+  const touchDevice = window.matchMedia("(pointer: coarse)").matches;
+  if (!touchDevice && event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
     $("composer").requestSubmit();
   }

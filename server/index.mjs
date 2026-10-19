@@ -78,6 +78,42 @@ export function createServer({
   bridge.on("approvalResolved", (value) => broadcast("approvalResolved", value));
   bridge.on("status", (value) => broadcast("status", value));
 
+  async function listSavedThreads() {
+    const threads = [];
+    const visited = new Set();
+    let cursor = null;
+    // The Codex list API is paginated; filtering the first page hid most projects.
+    for (let page = 0; page < 10 && threads.length < 500; page++) {
+      const result = await bridge.request("thread/list", {
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      }, 40000);
+      for (const thread of result?.data ?? result?.threads ?? []) {
+        if (!isValidThreadId(thread?.id) || visited.has(thread.id)) continue;
+        visited.add(thread.id);
+        threads.push({ ...thread, editable: isAllowedWorkspace(thread.cwd, workspaces) });
+      }
+      if (!result?.nextCursor || result.nextCursor === cursor) break;
+      cursor = result.nextCursor;
+    }
+    return threads;
+  }
+
+  async function assertKnownThread(threadId) {
+    if (!isValidThreadId(threadId)) {
+      const error = new Error("Invalid thread ID");
+      error.httpStatus = 400;
+      throw error;
+    }
+    const thread = (await listSavedThreads()).find((item) => item.id === threadId);
+    if (!thread) {
+      const error = new Error("Saved Codex thread not found");
+      error.httpStatus = 404;
+      throw error;
+    }
+    return thread;
+  }
+
   async function assertAuthorizedThread(threadId) {
     if (!isValidThreadId(threadId)) {
       const error = new Error("Invalid thread ID");
@@ -164,9 +200,8 @@ export function createServer({
       if (!bridge.ready) return respond(res, 503, { error: "Codex app-server is not ready. Check local Codex sign-in and startup." });
 
       if (req.method === "GET" && pathname === "/api/threads") {
-        const result = await bridge.request("thread/list", { limit: 50 });
-        const items = (result?.data ?? result?.threads ?? []).filter((thread) => isAllowedWorkspace(thread.cwd, workspaces));
-        return respond(res, 200, { threads: items, nextCursor: result?.nextCursor ?? null });
+        const threads = await listSavedThreads();
+        return respond(res, 200, { threads, total: threads.length });
       }
       if (req.method === "POST" && pathname === "/api/threads") {
         const body = await parseJson(req);
@@ -184,7 +219,14 @@ export function createServer({
       const threadMatch = /^\/api\/threads\/([^/]+)$/.exec(pathname);
       if (req.method === "GET" && threadMatch) {
         const threadId = threadMatch[1];
-        const thread = await assertAuthorizedThread(threadId);
+        const known = await assertKnownThread(threadId);
+        const read = await bridge.request("thread/read", { threadId, includeTurns: false });
+        const thread = read?.thread;
+        if (thread?.cwd !== known.cwd) {
+          const error = new Error("Saved Codex thread directory changed");
+          error.httpStatus = 403;
+          throw error;
+        }
         let turns = [];
         let historyUnavailable = false;
         try {
@@ -196,7 +238,7 @@ export function createServer({
           historyUnavailable = true;
         }
         return respond(res, 200, {
-          thread: { ...thread, turns },
+          thread: { ...thread, editable: known.editable, turns },
           activeTurnId: bridge.activeTurns.get(threadId) ?? null,
           historyUnavailable,
         });

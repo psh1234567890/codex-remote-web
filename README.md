@@ -9,6 +9,10 @@
 ## Features
 
 - View Codex threads and their recent messages in a responsive web dashboard.
+- Browse saved Codex conversations across projects, with a **read-only** mode
+  for conversations outside the explicit local workspace allowlist.
+- Touch-friendly collapsible project drawer and searchable conversation list
+  on tablets and phones.
 - Start a thread in an **explicitly allowed local workspace**.
 - Send follow-up instructions and stream live progress.
 - Review individual command/file-change approval requests; **no automatic approval**.
