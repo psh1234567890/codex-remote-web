@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CodexBridge } from "./bridge.mjs";
+import { recordCodexError } from "./diagnostics.mjs";
 import { ProjectPermissions } from "./project-permissions.mjs";
 import {
   configuredWorkspaces,
@@ -208,6 +209,7 @@ export function createServer({
   }
 
   const server = http.createServer(async (req, res) => {
+    let codexStage = "request";
     try {
       if (!isTrustedHost(req.headers.host, trustedHosts)) return respond(res, 421, { error: "Untrusted Host header" });
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -379,6 +381,7 @@ export function createServer({
       }
       const messageMatch = /^\/api\/threads\/([^/]+)\/messages$/.exec(pathname);
       if (req.method === "POST" && messageMatch) {
+        codexStage = "thread/lookup";
         const threadId = messageMatch[1];
         // Existing projects may be discussed without granting filesystem writes.
         // Only explicitly allowlisted workspaces retain workspace-write access.
@@ -397,7 +400,9 @@ export function createServer({
         if (typeof body.text !== "string" || !body.text.trim() || body.text.length > 12000) {
           return respond(res, 400, { error: "Message must contain 1–12,000 characters" });
         }
+        codexStage = "thread/resume";
         await bridge.resumeThread(threadId);
+        codexStage = "turn/start";
         const result = await bridge.request("turn/start", {
           threadId,
           input: [{ type: "text", text: body.text.trim() }],
@@ -432,7 +437,12 @@ export function createServer({
       // An upstream JSON-RPC message can contain private local filesystem
       // paths. Return only a classified, non-sensitive error to Safari.
       const detail = classifyCodexFailure(error);
-      return respond(res, detail.status, { code: detail.code, error: detail.error });
+      const diagnosticId = recordCodexError(permissions.root ?? ROOT, codexStage, error);
+      return respond(res, detail.status, {
+        code: detail.code,
+        diagnosticId,
+        error: detail.error,
+      });
     }
   });
   server.on("close", () => {

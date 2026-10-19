@@ -64,7 +64,8 @@ async function api(path, options = {}) {
   const data = await response.json();
   if (!response.ok) {
     if (response.status === 401) disconnect();
-    throw new Error(data.error ?? `HTTP ${response.status}`);
+    const suffix = data.diagnosticId ? " (진단 코드: " + data.diagnosticId + ")" : "";
+    throw new Error((data.error ?? `HTTP ${response.status}`) + suffix);
   }
   return data;
 }

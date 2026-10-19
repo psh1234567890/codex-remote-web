@@ -293,6 +293,7 @@ test("Codex rollout not found reports a safe actionable error, not a generic HTT
     assert.equal(response.status, 409);
     const payload = await response.json();
     assert.equal(payload.code, "THREAD_NOT_RESTORABLE");
+    assert.match(payload.diagnosticId, /^[a-f0-9]{10}$/);
     assert.doesNotMatch(JSON.stringify(payload), /123-private-value/);
   } finally { await app.close(); }
 });

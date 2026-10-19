@@ -5,6 +5,8 @@ import path from "node:path";
 import { CodexBridge } from "../server/bridge.mjs";
 
 const cwd = mkdtempSync(path.join(os.tmpdir(), "crw-resume-smoke-"));
+const sandbox = process.argv.includes("--workspace-write") ? "workspace-write" : "read-only";
+const approvalPolicy = sandbox === "workspace-write" ? "on-request" : "never";
 let bridge = new CodexBridge();
 let threadId;
 let successful = false;
@@ -25,15 +27,15 @@ function waitCompleted(client, id, ms = 50000) {
 }
 try {
   await bridge.start();
-  const started = await bridge.request("thread/start", { cwd, sandbox: "read-only", approvalPolicy: "never" }, 30000);
+  const started = await bridge.request("thread/start", { cwd, sandbox, approvalPolicy }, 30000);
   threadId = started?.thread?.id;
   if (!threadId) throw new Error("thread/start did not provide thread ID");
   const firstDone = waitCompleted(bridge, threadId);
   const firstTurn = await bridge.request("turn/start", {
     threadId,
     input: [{ type: "text", text: "Reply OK. Do not use tools." }],
-    sandbox: "read-only",
-    approvalPolicy: "never",
+    sandbox,
+    approvalPolicy,
   }, 40000);
   if (!firstTurn?.turn?.id) throw new Error("First turn was not accepted");
   console.log("First turn status:", await firstDone);
@@ -46,8 +48,8 @@ try {
   const outcome = await bridge.request("turn/start", {
     threadId,
     input: [{ type: "text", text: "Reply with only OK. Do not use tools or modify files." }],
-    sandbox: "read-only",
-    approvalPolicy: "never",
+    sandbox,
+    approvalPolicy,
   }, 40000);
   if (!outcome?.turn?.id) throw new Error("turn/start did not provide turn ID");
   console.log("Reopened saved Codex thread accepted a read-only chat turn.");
