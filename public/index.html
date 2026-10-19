@@ -103,6 +103,11 @@
             <div class="composer-bottom"><span class="composer-workspace"><svg class="icon"><use href="#i-folder"/></svg><span id="composer-workspace-name">프로젝트</span></span><span class="composer-shortcut">Enter 전송 · Shift+Enter 줄바꿈</span><button id="send" class="send-button" type="submit" aria-label="메시지 전송"><svg class="icon"><use href="#i-send"/></svg></button></div>
           </form>
           <p id="composer-note" class="composer-note">Codex는 선택된 프로젝트에서 실행됩니다. 일부 작업에는 승인이 필요합니다.</p>
+          <div id="composer-error" class="composer-error hidden" role="alert">
+            <span id="composer-error-message"></span>
+            <button id="composer-error-dismiss" type="button" aria-label="오류 메시지 닫기">닫기</button>
+          </div>
+          <button id="thread-recovery" class="outline thread-recovery hidden" type="button">선택한 프로젝트에서 새 채팅 시작</button>
         </section>
       </div>
     </main>

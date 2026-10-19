@@ -35,6 +35,38 @@ function respond(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+function classifyCodexFailure(error) {
+  const message = String(error?.message ?? "");
+  if (/no rollout found|rollout (?:not found|missing)/i.test(message)) {
+    return {
+      status: 409, code: "THREAD_NOT_RESTORABLE",
+      error: "이 대화는 Codex 저장 기록을 복원할 수 없습니다. 기존 대화는 그대로 두고 새 채팅을 시작해 주세요.",
+    };
+  }
+  if (/no such file or directory|ENOENT|working directory does not exist|cwd.*not found|not a directory/i.test(message)) {
+    return {
+      status: 409, code: "PROJECT_FOLDER_MISSING",
+      error: "이 대화의 작업 폴더를 현재 PC에서 찾을 수 없습니다. 폴더를 복구하거나 존재하는 프로젝트에서 새 채팅을 시작해 주세요.",
+    };
+  }
+  if (/already.*(?:turn|running)|turn.*in progress|another turn is active/i.test(message)) {
+    return {
+      status: 409, code: "THREAD_BUSY",
+      error: "이 대화에서 Codex 작업이 이미 실행 중입니다. 완료될 때까지 기다리거나 작업 중지를 눌러 주세요.",
+    };
+  }
+  if (/timed out/i.test(message)) {
+    return { status: 504, code: "CODEX_TIMEOUT", error: "Codex 응답 시간이 초과됐습니다. 잠시 기다린 후 다시 시도해 주세요." };
+  }
+  if (/disconnected|not connected/i.test(message)) {
+    return { status: 503, code: "CODEX_DISCONNECTED", error: "PC에서 Codex 연결이 끊어졌습니다. 로컬 Codex 서버를 확인해 주세요." };
+  }
+  return {
+    status: 502, code: "CODEX_RPC_FAILED",
+    error: "Codex가 이 작업 요청을 거부했습니다. 다른 대화에서도 같은 문제가 발생하면 PC의 Codex 로그인과 앱 서버 상태를 확인해 주세요.",
+  };
+}
+
 async function parseJson(req) {
   const chunks = [];
   let bytes = 0;
@@ -98,6 +130,7 @@ export function createServer({
         threads.push({
           ...thread,
           projectId: permissions.projectId(thread.cwd),
+          available: permissions.isAvailable(thread.cwd),
           editable: permissions.canWrite(thread.cwd),
         });
       }
@@ -336,6 +369,7 @@ export function createServer({
           thread: {
             ...thread,
             projectId: permissions.projectId(thread.cwd),
+            available: permissions.isAvailable(thread.cwd),
             editable: permissions.canWrite(thread.cwd),
             turns,
           },
@@ -352,6 +386,12 @@ export function createServer({
         const current = await bridge.request("thread/read", { threadId, includeTurns: false });
         if (!current?.thread || current.thread.cwd !== known.cwd) {
           return respond(res, 403, { error: "Saved thread directory changed" });
+        }
+        if (!permissions.isAvailable(current.thread.cwd)) {
+          return respond(res, 409, {
+            code: "PROJECT_FOLDER_MISSING",
+            error: "이 대화의 원래 프로젝트 폴더가 PC에 없습니다. 저장된 대화는 읽을 수 있지만 메시지를 계속하려면 폴더를 복구하거나 다른 프로젝트에서 새 채팅을 시작해야 합니다.",
+          });
         }
         const body = await parseJson(req);
         if (typeof body.text !== "string" || !body.text.trim() || body.text.length > 12000) {
@@ -388,8 +428,11 @@ export function createServer({
       return respond(res, 404, { error: "Unknown API route" });
     } catch (error) {
       const status = Number.isInteger(error.httpStatus) ? error.httpStatus : 500;
-      // Do not expose internal errors or sensitive filesystem paths in HTTP responses.
-      return respond(res, status, { error: status === 500 ? "Codex request failed. Check the local server." : error.message });
+      if (status !== 500) return respond(res, status, { error: error.message });
+      // An upstream JSON-RPC message can contain private local filesystem
+      // paths. Return only a classified, non-sensitive error to Safari.
+      const detail = classifyCodexFailure(error);
+      return respond(res, detail.status, { code: detail.code, error: detail.error });
     }
   });
   server.on("close", () => {

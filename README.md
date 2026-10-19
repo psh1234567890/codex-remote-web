@@ -25,6 +25,14 @@
 The standalone `node scripts/smoke-chat.mjs` check runs one real,
 read-only Codex turn in a temporary empty project, archives its test thread,
 and consumes a small amount of model usage. It is not part of automated CI.
+The standalone `node scripts/smoke-resumed-chat.mjs` check tests reopening
+and messaging in a saved thread with a completed turn. It also uses a throwaway
+folder and is not part of CI.
+
+If a saved project's original working directory is missing, Codex cannot
+continue a turn in that working directory. The UI now explains this instead
+of reporting a generic server failure and offers a new thread in an existing
+selected project. Other errors are classified without leaking local paths.
 - Touch-friendly collapsible project drawer and searchable conversation list
   on tablets and phones.
 - Start a thread in an **explicitly allowed local workspace**.

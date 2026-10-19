@@ -286,6 +286,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .project-access-toggle.enabled { border-color: #577c6c; color: #a7ddc2; }
 .project-access-toggle:hover { background: #343d3d; }
 .project-unavailable { flex: none; font-size: 10px; color: #a9a9a9; padding: 5px 6px; background: #303030; border-radius: 7px; }
+.composer-error { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px; margin-top: 10px; background: #3b2929; border: 1px solid #694343; color: #f1c2c2; border-radius: 9px; font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.composer-error button { flex: none; background: #4b3434; border: 1px solid #916060; border-radius: 7px; color: #f5dada; padding: 5px 9px; min-height: 31px; }
+.thread-recovery { align-self: center; margin-top: 9px; min-height: 38px; }
 .project-access-dialog { width: min(430px, calc(100vw - 36px)); border: 1px solid #525252; border-radius: 14px; background: #242424; color: #eee; box-shadow: 0 20px 80px #0009; padding: 22px; }
 .project-access-dialog::backdrop { background: #000b; }
 .project-access-dialog h2 { font-size: 19px; margin: 0 0 15px; }

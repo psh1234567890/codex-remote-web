@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import http from "node:http";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, rmdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createServer } from "../server/index.mjs";
@@ -255,4 +255,44 @@ test("cross-origin mutation is rejected", async () => {
   } finally {
     await app.close();
   }
+});
+
+test("a saved chat whose working directory disappeared gets an actionable error", async () => {
+  const app = await setup();
+  try {
+    // The target was created as an empty child of a test-only temporary folder.
+    rmdirSync(app.otherCwd);
+    const headers = { Authorization: "Bearer " + secret, "Content-Type": "application/json" };
+    const detail = await fetch(app.url + "/api/threads/denied-thread", { headers });
+    assert.equal(detail.status, 200, "the old conversation remains readable");
+    assert.equal((await detail.json()).thread.available, false);
+    const response = await fetch(app.url + "/api/threads/denied-thread/messages", {
+      method: "POST", headers, body: JSON.stringify({ text: "Hello" }),
+    });
+    assert.equal(response.status, 409);
+    const payload = await response.json();
+    assert.equal(payload.code, "PROJECT_FOLDER_MISSING");
+    assert.match(payload.error, /프로젝트 폴더|원래 프로젝트 폴더/);
+    assert.equal(app.bridge.calls.some((call) => call.method === "turn/start"), false);
+  } finally { await app.close(); }
+});
+
+test("Codex rollout not found reports a safe actionable error, not a generic HTTP 500", async () => {
+  const app = await setup();
+  try {
+    const original = app.bridge.request.bind(app.bridge);
+    app.bridge.request = async (method, params) => {
+      if (method === "turn/start") throw new Error("no rollout found for thread id 123-private-value");
+      return original(method, params);
+    };
+    const response = await fetch(app.url + "/api/threads/allowed-thread/messages", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + secret, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Hello" }),
+    });
+    assert.equal(response.status, 409);
+    const payload = await response.json();
+    assert.equal(payload.code, "THREAD_NOT_RESTORABLE");
+    assert.doesNotMatch(JSON.stringify(payload), /123-private-value/);
+  } finally { await app.close(); }
 });

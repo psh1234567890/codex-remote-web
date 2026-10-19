@@ -40,6 +40,17 @@ function toast(message) {
   toast.timer = setTimeout(() => element.classList.add("hidden"), 4500);
 }
 
+function showComposerError(message) {
+  $("composer-error-message").textContent = message;
+  $("composer-error").classList.remove("hidden");
+  $("composer-error").scrollIntoView({ block: "nearest", behavior: "auto" });
+}
+
+function clearComposerError() {
+  $("composer-error").classList.add("hidden");
+  $("composer-error-message").textContent = "";
+}
+
 async function api(path, options = {}) {
   const headers = remoteMode ? {} : { Authorization: `Bearer ${state.token}` };
   if (remoteMode && (options.method ?? "GET") === "POST") headers["X-Remote-Client"] = "1";
@@ -342,6 +353,7 @@ function showWelcome() {
   $("nav-home").classList.add("selected");
   renderThreads();
   renderActive();
+  clearComposerError();
   setSidebarOpen(false);
 }
 
@@ -374,12 +386,17 @@ function renderConversation(thread) {
   $("thread-meta").textContent = [thread.cwd?.split(/[\\/]/).pop(), shortDate(thread.createdAt)].filter(Boolean).join("  ·  ");
   $("composer-workspace-name").textContent = thread.cwd?.split(/[\\/]/).pop() || "프로젝트";
   state.selectedEditable = thread.editable === true;
-  $("prompt").disabled = false;
-  $("send").disabled = false;
+  const folderMissing = thread.available === false;
+  $("prompt").disabled = folderMissing;
+  $("send").disabled = folderMissing;
   $("prompt").placeholder = state.selectedEditable ? "Codex와 함께 작업하세요" : "읽기 전용 채팅 · 파일 수정 불가";
-  $("composer-note").textContent = state.selectedEditable
-    ? "이 프로젝트는 원격 작업이 허용되어 있습니다. 일부 작업에는 승인이 필요합니다."
-    : "읽기 전용 채팅이 가능합니다. 파일을 수정하려면 PC에서 프로젝트를 허용 목록에 추가해야 합니다.";
+  $("composer-note").textContent = folderMissing
+    ? "PC에서 이 대화의 원래 폴더가 확인되지 않습니다. 저장 기록은 열람할 수 있지만 이 대화에 메시지를 보낼 수 없습니다."
+    : state.selectedEditable
+      ? "이 프로젝트는 원격 작업이 허용되어 있습니다. 일부 작업에는 승인이 필요합니다."
+      : "읽기 전용 채팅이 가능합니다. 파일을 수정하려면 PC에서 프로젝트를 허용 목록에 추가해야 합니다.";
+  $("thread-recovery").classList.toggle("hidden", !folderMissing);
+  clearComposerError();
   const container = $("messages");
   container.replaceChildren();
   for (const turn of thread.turns ?? []) {
@@ -447,6 +464,7 @@ async function sendMessage(event) {
   const text = input.value.trim();
   if (!text) return;
   $("send").disabled = true;
+  clearComposerError();
   try {
     const result = await api("/threads/" + encodeURIComponent(state.selectedThread) + "/messages", { method: "POST", body: { text } });
     input.value = "";
@@ -457,8 +475,9 @@ async function sendMessage(event) {
     addActivity("지시 전송", text.slice(0, 95));
   } catch (error) {
     toast(error.message);
+    showComposerError(error.message);
   } finally {
-    $("send").disabled = false;
+    $("send").disabled = $("prompt").disabled;
   }
 }
 
@@ -663,6 +682,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setSidebarOpen(false);
 });
 $("thread-search").addEventListener("input", renderThreads);
+$("composer-error-dismiss").addEventListener("click", clearComposerError);
+$("thread-recovery").addEventListener("click", createThread);
 $("project-access-form").addEventListener("submit", enableProjectAccess);
 $("access-cancel").addEventListener("click", () => {
   $("management-key").value = "";
