@@ -19,7 +19,7 @@ const API_ROUTES = [
   ["POST", /^\/api\/projects\/[a-f0-9]{32}\/access$/],
   ["POST", /^\/api\/threads$/],
   ["GET", /^\/api\/threads\/[A-Za-z0-9_-]{5,150}$/],
-  ["POST", /^\/api\/threads\/[A-Za-z0-9_-]{5,150}\/(messages|interrupt)$/],
+  ["POST", /^\/api\/threads\/[A-Za-z0-9_-]{5,150}\/(messages|interrupt|fork)$/],
   ["POST", /^\/api\/approvals\/[a-f0-9-]{36}$/],
 ];
 const COMMON = {

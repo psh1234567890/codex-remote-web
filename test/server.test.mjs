@@ -27,10 +27,11 @@ class FakeBridge extends EventEmitter {
       ] };
     }
     if (method === "thread/read") {
-      return { thread: { id: params.threadId, cwd: ["allowed-thread", "new-thread"].includes(params.threadId) ? this.cwd : this.otherCwd, turns: [] } };
+      return { thread: { id: params.threadId, cwd: ["allowed-thread", "new-thread", "forked-thread"].includes(params.threadId) ? this.cwd : this.otherCwd, turns: [] } };
     }
     if (method === "thread/turns/list") return { data: [] };
     if (method === "thread/start") return { thread: { id: "new-thread", cwd: params.cwd, turns: [] } };
+    if (method === "thread/fork") return { thread: { id: "forked-thread", cwd: params.cwd, turns: [] } };
     if (method === "thread/resume") return { thread: { id: params.threadId } };
     if (method === "turn/start") return { turn: { id: "new-turn" } };
     return {};
@@ -295,5 +296,61 @@ test("Codex rollout not found reports a safe actionable error, not a generic HTT
     assert.equal(payload.code, "THREAD_NOT_RESTORABLE");
     assert.match(payload.diagnosticId, /^[a-f0-9]{10}$/);
     assert.doesNotMatch(JSON.stringify(payload), /123-private-value/);
+  } finally { await app.close(); }
+});
+
+test("active-writer conflicts are classified and offer non-destructive continuation", async () => {
+  const app = await setup();
+  try {
+    app.bridge.resumeThread = async () => {
+      throw new Error("thread allowed-thread already has an active writer");
+    };
+    const response = await fetch(app.url + "/api/threads/allowed-thread/messages", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + secret, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Continue" }),
+    });
+    assert.equal(response.status, 409);
+    const payload = await response.json();
+    assert.equal(payload.code, "THREAD_ACTIVE_WRITER");
+    assert.match(payload.error, /복제해서 이어가기/);
+    assert.match(payload.diagnosticId, /^[0-9a-f]{10}$/);
+    assert.equal(app.bridge.calls.some((call) => call.method === "turn/start"), false);
+    const fork = await fetch(app.url + "/api/threads/allowed-thread/fork", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + secret, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(fork.status, 201);
+    const result = await fork.json();
+    assert.equal(result.thread.id, "forked-thread");
+    assert.equal(result.sourceThreadId, "allowed-thread");
+    assert.equal(result.thread.editable, true);
+    assert.equal(app.bridge.loadedThreads.has("forked-thread"), true);
+    const forkCall = app.bridge.calls.find((call) => call.method === "thread/fork");
+    assert.equal(forkCall.params.threadId, "allowed-thread");
+    assert.equal(forkCall.params.cwd, process.cwd());
+    assert.equal(forkCall.params.sandbox, "workspace-write");
+    assert.equal((await fetch(app.url + "/api/threads/forked-thread", {
+      headers: { Authorization: "Bearer " + secret },
+    })).status, 200);
+  } finally { await app.close(); }
+});
+
+test("forking a non-writable project preserves read-only sandbox and rejects unknown threads", async () => {
+  const app = await setup();
+  try {
+    const headers = { Authorization: "Bearer " + secret, "Content-Type": "application/json" };
+    const fork = await fetch(app.url + "/api/threads/denied-thread/fork", {
+      method: "POST", headers, body: "{}",
+    });
+    assert.equal(fork.status, 201);
+    const call = app.bridge.calls.find((item) => item.method === "thread/fork");
+    assert.equal(call.params.sandbox, "read-only");
+    assert.equal(call.params.approvalPolicy, "never");
+    assert.equal(call.params.cwd, app.otherCwd);
+    assert.equal((await fetch(app.url + "/api/threads/not-listed-thread/fork", {
+      method: "POST", headers, body: "{}",
+    })).status, 404);
   } finally { await app.close(); }
 });

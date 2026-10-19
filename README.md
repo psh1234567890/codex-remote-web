@@ -33,6 +33,13 @@ If a saved project's original working directory is missing, Codex cannot
 continue a turn in that working directory. The UI now explains this instead
 of reporting a generic server failure and offers a new thread in an existing
 selected project. Other errors are classified without leaking local paths.
+
+If another Codex process already owns the thread writer, the app-server
+returns `already has an active writer`. The UI offers an explicit **Fork and
+continue** action (`thread/fork`) to duplicate conversation history into an
+independent thread without interrupting the other process. A fork inherits
+the source project directory and uses the current per-project sandbox policy.
+The draft remains in the composer and is not sent automatically.
 - Touch-friendly collapsible project drawer and searchable conversation list
   on tablets and phones.
 - Start a thread in an **explicitly allowed local workspace**.

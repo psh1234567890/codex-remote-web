@@ -40,15 +40,17 @@ function toast(message) {
   toast.timer = setTimeout(() => element.classList.add("hidden"), 4500);
 }
 
-function showComposerError(message) {
+function showComposerError(message, code = null) {
   $("composer-error-message").textContent = message;
   $("composer-error").classList.remove("hidden");
+  $("fork-thread").classList.toggle("hidden", code !== "THREAD_ACTIVE_WRITER");
   $("composer-error").scrollIntoView({ block: "nearest", behavior: "auto" });
 }
 
 function clearComposerError() {
   $("composer-error").classList.add("hidden");
   $("composer-error-message").textContent = "";
+  $("fork-thread").classList.add("hidden");
 }
 
 async function api(path, options = {}) {
@@ -65,7 +67,9 @@ async function api(path, options = {}) {
   if (!response.ok) {
     if (response.status === 401) disconnect();
     const suffix = data.diagnosticId ? " (진단 코드: " + data.diagnosticId + ")" : "";
-    throw new Error((data.error ?? `HTTP ${response.status}`) + suffix);
+    const error = new Error((data.error ?? `HTTP ${response.status}`) + suffix);
+    error.code = data.code ?? null;
+    throw error;
   }
   return data;
 }
@@ -458,6 +462,30 @@ async function createThread() {
   }
 }
 
+async function forkThread() {
+  const sourceId = state.selectedThread;
+  if (!sourceId) return toast("먼저 대화를 선택하세요.");
+  const button = $("fork-thread");
+  button.disabled = true;
+  try {
+    const result = await api("/threads/" + encodeURIComponent(sourceId) + "/fork", {
+      method: "POST", body: {},
+    });
+    const fork = result.thread;
+    if (!fork?.id || fork.id === sourceId) throw new Error("독립된 대화를 생성하지 못했습니다.");
+    state.threads.unshift(fork);
+    await selectThread(fork.id);
+    toast("원본 대화를 보존하고 새 대화로 복제했습니다. 입력한 메시지를 다시 전송하세요.");
+    addActivity("대화 복제", threadName(fork));
+    $("prompt").focus();
+  } catch (error) {
+    showComposerError(error.message, error.code);
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function sendMessage(event) {
   event.preventDefault();
   if (!state.selectedThread) return toast("먼저 작업을 선택하세요.");
@@ -476,7 +504,7 @@ async function sendMessage(event) {
     addActivity("지시 전송", text.slice(0, 95));
   } catch (error) {
     toast(error.message);
-    showComposerError(error.message);
+    showComposerError(error.message, error.code);
   } finally {
     $("send").disabled = $("prompt").disabled;
   }
@@ -684,6 +712,7 @@ document.addEventListener("keydown", (event) => {
 });
 $("thread-search").addEventListener("input", renderThreads);
 $("composer-error-dismiss").addEventListener("click", clearComposerError);
+$("fork-thread").addEventListener("click", forkThread);
 $("thread-recovery").addEventListener("click", createThread);
 $("project-access-form").addEventListener("submit", enableProjectAccess);
 $("access-cancel").addEventListener("click", () => {

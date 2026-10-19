@@ -38,6 +38,12 @@ function respond(res, status, payload) {
 
 function classifyCodexFailure(error) {
   const message = String(error?.message ?? "");
+  if (/\balready has an active writer\b/i.test(message)) {
+    return {
+      status: 409, code: "THREAD_ACTIVE_WRITER",
+      error: "다른 Codex 실행 주체가 이 대화를 사용하고 있습니다. 기존 작업을 종료하지 않고, 아래 '대화 복제해서 이어가기'를 눌러 별도 대화로 이어갈 수 있습니다.",
+    };
+  }
   if (/no rollout found|rollout (?:not found|missing)/i.test(message)) {
     return {
       status: 409, code: "THREAD_NOT_RESTORABLE",
@@ -380,6 +386,44 @@ export function createServer({
         });
       }
       const messageMatch = /^\/api\/threads\/([^/]+)\/messages$/.exec(pathname);
+      const forkMatch = /^\/api\/threads\/([^/]+)\/fork$/.exec(pathname);
+      if (req.method === "POST" && forkMatch) {
+        codexStage = "thread/fork";
+        const sourceId = forkMatch[1];
+        const known = await assertKnownThread(sourceId);
+        const read = await bridge.request("thread/read", { threadId: sourceId, includeTurns: false });
+        if (!read?.thread || read.thread.cwd !== known.cwd) {
+          return respond(res, 403, { error: "Saved thread directory changed" });
+        }
+        if (!permissions.isAvailable(known.cwd)) {
+          return respond(res, 409, {
+            code: "PROJECT_FOLDER_MISSING",
+            error: "기존 작업 폴더가 없어서 대화를 복제할 수 없습니다. 프로젝트 폴더를 복구해 주세요.",
+          });
+        }
+        const writable = permissions.canWrite(known.cwd);
+        const result = await bridge.request("thread/fork", {
+          threadId: sourceId,
+          cwd: known.cwd,
+          sandbox: writable ? "workspace-write" : "read-only",
+          approvalPolicy: writable ? "on-request" : "never",
+          excludeTurns: true,
+        }, 40000);
+        const forked = result?.thread;
+        if (!isValidThreadId(forked?.id) || forked.id === sourceId || forked.cwd !== known.cwd) {
+          throw new Error("Invalid Codex fork response");
+        }
+        bridge.loadedThreads.add(forked.id);
+        return respond(res, 201, {
+          thread: {
+            ...forked,
+            projectId: permissions.projectId(known.cwd),
+            available: true,
+            editable: writable,
+          },
+          sourceThreadId: sourceId,
+        });
+      }
       if (req.method === "POST" && messageMatch) {
         codexStage = "thread/lookup";
         const threadId = messageMatch[1];
