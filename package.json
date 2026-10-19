@@ -15,7 +15,7 @@
     "remote:gateway": "node server/remote-gateway.mjs",
     "remote:code": "node scripts/remote-code.mjs",
     "remote:smoke": "node scripts/check-public.mjs",
-    "check": "node --check server/index.mjs && node --check server/bridge.mjs && node --check server/remote-gateway.mjs && node --check public/app.js && node --check public/remote-login.js"
+    "check": "node --check server/index.mjs && node --check server/bridge.mjs && node --check server/remote-gateway.mjs && node --check server/project-permissions.mjs && node --check public/app.js && node --check public/remote-login.js"
   },
   "dependencies": {
     "@openai/codex": "0.163.0"

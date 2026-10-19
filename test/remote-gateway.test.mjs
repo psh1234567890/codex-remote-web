@@ -55,6 +55,7 @@ test("Safari gateway blocks unauthenticated access and safely proxies authentica
   const port = await listen(gateway);
   try {
     assert.equal((await request(port, { pathname: "/api/threads" })).status, 401);
+    assert.equal((await request(port, { pathname: "/api/projects" })).status, 401);
     assert.equal((await request(port, { pathname: "/app" })).status, 303);
     assert.equal((await request(port)).status, 200);
     assert.equal((await request(port, { headers: { Host: "attacker.example:10000" } })).status, 421);
@@ -82,6 +83,18 @@ test("Safari gateway blocks unauthenticated access and safely proxies authentica
     assert.equal(JSON.parse(allowed.text).auth, true);
     assert.equal((await request(port, { pathname: "/app.js", headers: { Cookie: cookie } })).status, 200);
     assert.equal((await request(port, { pathname: "/api/health", headers: { Cookie: cookie } })).status, 404);
+    const projectList = await request(port, { pathname: "/api/projects", headers: { Cookie: cookie } });
+    assert.equal(projectList.status, 200);
+    assert.equal((await request(port, {
+      pathname: "/api/projects/" + "a".repeat(32) + "/access",
+      method: "POST", headers: { Cookie: cookie, Origin: "https://attacker.example", "X-Remote-Client": "1" },
+      body: { enabled: true },
+    })).status, 403);
+    assert.equal((await request(port, {
+      pathname: "/api/projects/" + "a".repeat(32) + "/access",
+      method: "POST", headers: { Cookie: cookie, Origin: "https://" + host, "X-Remote-Client": "1" },
+      body: { enabled: false },
+    })).status, 200);
     assert.equal((await request(port, { pathname: "/api/threads", method: "POST", body: {}, headers: { Cookie: cookie, Origin: "https://" + host } })).status, 403);
     const posted = await request(port, { pathname: "/api/threads", method: "POST", body: {}, headers: { Cookie: cookie, Origin: "https://" + host, "X-Remote-Client": "1" } });
     assert.equal(posted.status, 200);

@@ -62,7 +62,7 @@
       <div class="sidebar-top">
         <div class="brand-row"><strong>Codex</strong><span class="brand-suffix">Remote</span><svg class="icon tiny"><use href="#i-chevron"/></svg></div>
         <button id="new-thread" class="sidebar-new"><svg class="icon"><use href="#i-compose"/></svg><span>새 채팅</span></button>
-        <div class="sidebar-section-label">새 작업 허용 폴더</div>
+        <div class="sidebar-section-label">새 채팅 프로젝트</div>
         <div class="workspace-select-wrap"><svg class="icon"><use href="#i-folder"/></svg><select id="workspace-select" aria-label="작업 폴더 선택"></select><svg class="icon tiny"><use href="#i-chevron"/></svg></div>
         <div class="section-heading"><span>최근 대화</span><button id="refresh-threads" class="icon-button" aria-label="대화 목록 새로고침" title="새로고침"><svg class="icon"><use href="#i-refresh"/></svg></button></div>
         <label for="thread-search" class="sr-only">프로젝트 및 대화 검색</label>
@@ -116,6 +116,22 @@
       <div class="activity-footer"><svg class="icon"><use href="#i-lock"/></svg> 내 PC에서 안전하게 실행 중<br><small>인터넷에 로컬 포트를 직접 열지 마세요.</small></div>
     </aside>
   </div>
+  <dialog id="project-access-dialog" class="project-access-dialog">
+    <form id="project-access-form">
+      <h2>프로젝트 수정 권한</h2>
+      <p><strong id="access-project-name"></strong>에서 Codex가 파일을 수정하도록 <strong>2시간 동안</strong> 허용합니다.</p>
+      <p class="access-warning">PC에서 발급한 10분짜리 일회용 코드 또는 개인 관리 키가 필요합니다. 작업 승인 요청은 계속 표시됩니다.</p>
+      <label for="management-key">일회용 코드 / PC 관리 키</label>
+      <input id="management-key" name="management-key" type="password" autocomplete="off" spellcheck="false" required minlength="24" maxlength="64" placeholder="일회용 코드 또는 관리 키">
+      <p class="access-help">PC에서 코드 발급: <code>node scripts/write-code.mjs</code></p>
+      <p class="access-help">장기 관리 키 파일: <code>.local/project-management-key</code></p>
+      <p id="access-error" class="error" role="alert"></p>
+      <div class="access-actions">
+        <button id="access-cancel" type="button">취소</button>
+        <button id="access-confirm" type="submit">2시간 수정 허용</button>
+      </div>
+    </form>
+  </dialog>
   <div id="toast" class="toast hidden" role="status"></div>
 </body>
 </html>

@@ -5,6 +5,7 @@ const state = {
   selectedThread: null,
   selectedEditable: false,
   threads: [],
+  projects: [],
   workspaces: [],
   approvals: [],
   activity: [],
@@ -102,32 +103,111 @@ function renderThreads() {
     const name = thread.cwd?.split(/[\\/]/).filter(Boolean).at(-1) || "";
     return !search || (name + " " + threadName(thread)).toLocaleLowerCase().includes(search);
   });
-  if (!visible.length) {
+  const matches = state.projects.filter((project) =>
+    !search || project.name.toLocaleLowerCase().includes(search) ||
+      visible.some((thread) => thread.projectId === project.id),
+  );
+  if (!visible.length && !matches.length) {
     container.append(node("p", "empty-small", search ? "일치하는 프로젝트나 대화가 없습니다." : "저장된 Codex 대화가 없습니다."));
     return;
   }
   const groups = new Map();
   for (const thread of visible) {
-    const name = thread.cwd?.split(/[\\/]/).filter(Boolean).at(-1) || "경로 정보 없음";
-    if (!groups.has(name)) groups.set(name, []);
-    groups.get(name).push(thread);
+    const id = thread.projectId || thread.cwd || "unknown";
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(thread);
   }
-  for (const [name, threads] of groups) {
+  const ordered = [...matches];
+  for (const [id, threads] of groups) {
+    if (!ordered.some((project) => project.id === id)) {
+      ordered.push({ id, name: threads[0].cwd?.split(/[\\/]/).pop() || "경로 정보 없음", writable: false });
+    }
+  }
+  for (const project of ordered) {
+    const threads = groups.get(project.id) || [];
     const group = node("div", "thread-group");
+    const heading = node("div", "project-heading");
     const label = node("div", "thread-group-label");
-    label.append(iconNode("folder"), node("span", "", name + " · " + threads.length));
-    group.append(label);
+    label.append(iconNode("folder"), node("span", "", project.name + " · " + threads.length));
+    heading.append(label);
+    if (project.available === false) {
+      heading.append(node("span", "project-unavailable", "폴더 없음"));
+    } else if (/^[a-f0-9]{32}$/.test(project.id)) {
+      const toggle = node("button", "project-access-toggle " + (project.writable ? "enabled" : "readonly"), project.writable ? "쓰기 끄기" : "쓰기 켜기");
+      toggle.type = "button";
+      toggle.setAttribute("aria-label", project.name + (project.writable ? " 파일 수정 권한 끄기" : " 파일 수정 권한 켜기"));
+      if (project.expiresAt) toggle.title = "임시 권한: " + new Date(project.expiresAt).toLocaleTimeString("ko-KR") + "까지";
+      toggle.addEventListener("click", () => void changeProjectAccess(project));
+      heading.append(toggle);
+    }
+    group.append(heading);
     for (const thread of threads) {
       const item = node("button", "thread-item" + (state.selectedThread === thread.id ? " active" : ""));
       item.type = "button";
-      item.title = thread.editable ? threadName(thread) : threadName(thread) + " — 열람 전용";
+      item.title = project.writable ? threadName(thread) : threadName(thread) + " — 읽기 전용 채팅";
       item.append(node("span", "thread-item-title", threadName(thread)));
-      item.append(node("span", "thread-item-date", (thread.editable ? "작업 가능" : "열람 전용") + " · " + (shortDate(thread.updatedAt ?? thread.createdAt) || "저장된 대화")));
+      item.append(node("span", "thread-item-date", (project.writable ? "파일 수정 가능" : "읽기 전용 채팅") + " · " + (shortDate(thread.updatedAt ?? thread.createdAt) || "저장된 대화")));
       item.addEventListener("click", () => selectThread(thread.id));
       group.append(item);
     }
     container.append(group);
   }
+}
+
+async function loadProjects() {
+  const result = await api("/projects");
+  const before = $("workspace-select").value;
+  state.projects = result.projects ?? [];
+  state.workspaces = state.projects.filter((project) => project.available)
+    .map(({ id, name, writable }) => ({ id, name, writable }));
+  renderWorkspaces();
+  if (state.workspaces.some((workspace) => workspace.id === before)) {
+    $("workspace-select").value = before;
+    updateWorkspaceLabel();
+  }
+  renderThreads();
+}
+
+async function changeProjectAccess(project) {
+  if (!project.writable) {
+    $("access-project-name").textContent = project.name;
+    $("project-access-form").dataset.projectId = project.id;
+    $("management-key").value = "";
+    $("access-error").textContent = "";
+    $("project-access-dialog").showModal();
+    return;
+  }
+  if (!window.confirm(project.name + "의 파일 수정 권한을 끌까요? 이후 메시지는 읽기 전용으로 실행됩니다.")) return;
+  try {
+    await api("/projects/" + project.id + "/access", { method: "POST", body: { enabled: false } });
+    await refreshProjectPermissions();
+    toast(project.name + " 파일 수정 권한을 껐습니다.");
+  } catch (error) { toast(error.message); }
+}
+
+async function refreshProjectPermissions() {
+  await loadProjects();
+  await loadThreads();
+  if (state.selectedThread) await selectThread(state.selectedThread);
+}
+
+async function enableProjectAccess(event) {
+  event.preventDefault();
+  const id = $("project-access-form").dataset.projectId;
+  const key = $("management-key").value.trim();
+  $("access-confirm").disabled = true;
+  $("access-error").textContent = "";
+  try {
+    await api("/projects/" + id + "/access", {
+      method: "POST", body: { enabled: true, managementKey: key },
+    });
+    $("management-key").value = "";
+    $("project-access-dialog").close();
+    await refreshProjectPermissions();
+    toast("파일 수정 권한을 2시간 동안 활성화했습니다.");
+  } catch (error) {
+    $("access-error").textContent = error.message;
+  } finally { $("access-confirm").disabled = false; }
 }
 
 async function loadThreads() {
@@ -350,7 +430,8 @@ async function createThread() {
     const result = await api("/threads", { method: "POST", body: { workspaceId: $("workspace-select").value } });
     const id = result.thread?.id;
     if (!id) throw new Error("새 대화 ID를 받지 못했습니다.");
-    state.threads.unshift({ ...result.thread, editable: true });
+    const workspace = state.workspaces.find((item) => item.id === $("workspace-select").value);
+    state.threads.unshift({ ...result.thread, projectId: workspace?.id, editable: workspace?.writable === true });
     await selectThread(id);
     $("prompt").focus();
     addActivity("새 작업 시작", threadName(result.thread));
@@ -548,8 +629,10 @@ async function connect() {
   $("dashboard").classList.remove("hidden");
   setActivityOpen(!window.matchMedia("(max-width: 1150px)").matches);
   connection(session.codexReady);
-  const [workspaces, approvals] = await Promise.all([api("/workspaces"), api("/approvals")]);
-  state.workspaces = workspaces.workspaces;
+  const [projects, approvals] = await Promise.all([api("/projects"), api("/approvals")]);
+  state.projects = projects.projects ?? [];
+  state.workspaces = state.projects.filter((project) => project.available)
+    .map(({ id, name, writable }) => ({ id, name, writable }));
   state.approvals = approvals.approvals;
   renderWorkspaces();
   renderApprovals();
@@ -580,6 +663,12 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setSidebarOpen(false);
 });
 $("thread-search").addEventListener("input", renderThreads);
+$("project-access-form").addEventListener("submit", enableProjectAccess);
+$("access-cancel").addEventListener("click", () => {
+  $("management-key").value = "";
+  $("project-access-dialog").close();
+});
+$("project-access-dialog").addEventListener("close", () => { $("management-key").value = ""; });
 $("rail-new").addEventListener("click", createThread);
 $("rail-activity").addEventListener("click", () => setActivityOpen(!$("dashboard").classList.contains("activity-open")));
 $("activity-toggle").addEventListener("click", () => setActivityOpen(!$("dashboard").classList.contains("activity-open")));

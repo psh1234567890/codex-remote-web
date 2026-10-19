@@ -23,6 +23,14 @@ Treat access to this dashboard as access to your development machine.
 - Since a public authentication endpoint is still a security-sensitive
   surface, this initial implementation is **not** a security-audited remote
   access solution. Disable Funnel when not needed.
+- Per-project **write** permissions require an additional 256-bit PC management
+  key (stored only under gitignored `.local/project-management-key`). The
+  browser sends it only when enabling access; it is not stored client-side.
+  A separate 96-bit one-use grant code can be generated locally and expires
+  in ten minutes; only its hash is saved under `.local/`.
+  Grants expire after two hours, and their paths come only from existing
+  Codex project records. Disabling persists. Permissions are checked on each
+  mutable Codex operation; the server still requests command/file approvals.
 - **Never** expose the HTTP port directly to the internet or put the token in a URL.
 - Approvals require an explicit click and are never automatically accepted.
 - This project does not expose a generic shell, file reader, or arbitrary JSON-RPC endpoint.

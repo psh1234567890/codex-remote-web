@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CodexBridge } from "./bridge.mjs";
+import { ProjectPermissions } from "./project-permissions.mjs";
 import {
   configuredWorkspaces,
   isAllowedWorkspace,
@@ -59,12 +60,15 @@ export function createServer({
   bridge,
   accessToken,
   workspaces,
+  permissionManager,
   trustedHosts = [],
   staticRoot = path.join(ROOT, "public"),
 } = {}) {
   if (!bridge || !accessToken || !workspaces?.length) throw new Error("Missing server configuration");
+  const permissions = permissionManager ?? new ProjectPermissions({ root: ROOT, baseWorkspaces: workspaces });
   const clients = new Set();
   const failedLogins = new Map();
+  const failedManagement = new Map();
 
   function broadcast(kind, value) {
     const payload = `event: ${kind}\ndata: ${JSON.stringify(value)}\n\n`;
@@ -91,12 +95,45 @@ export function createServer({
       for (const thread of result?.data ?? result?.threads ?? []) {
         if (!isValidThreadId(thread?.id) || visited.has(thread.id)) continue;
         visited.add(thread.id);
-        threads.push({ ...thread, editable: isAllowedWorkspace(thread.cwd, workspaces) });
+        threads.push({
+          ...thread,
+          projectId: permissions.projectId(thread.cwd),
+          editable: permissions.canWrite(thread.cwd),
+        });
       }
       if (!result?.nextCursor || result.nextCursor === cursor) break;
       cursor = result.nextCursor;
     }
     return threads;
+  }
+
+  async function listProjects() {
+    const threads = await listSavedThreads();
+    const projects = new Map();
+    for (const workspace of workspaces) {
+      const id = permissions.projectId(workspace.path);
+      if (id) projects.set(id, { id, path: workspace.path, name: workspace.name, threadCount: 0 });
+    }
+    for (const thread of threads) {
+      if (!thread.projectId) continue;
+      let project = projects.get(thread.projectId);
+      if (!project) {
+        project = {
+          id: thread.projectId,
+          path: thread.cwd,
+          name: path.basename(thread.cwd),
+          threadCount: 0,
+        };
+        projects.set(thread.projectId, project);
+      }
+      project.threadCount++;
+    }
+    return [...projects.values()].map((project) => ({
+      ...project,
+      available: permissions.isAvailable(project.path),
+      writable: permissions.canWrite(project.path),
+      expiresAt: permissions.accessUntil(project.path),
+    }));
   }
 
   async function assertKnownThread(threadId) {
@@ -111,9 +148,8 @@ export function createServer({
       // thread/list. Only permit our own already-loaded thread IDs here.
       if (bridge.loadedThreads.has(threadId)) {
         const response = await bridge.request("thread/read", { threadId, includeTurns: false });
-        if (response?.thread?.id === threadId &&
-            isAllowedWorkspace(response.thread.cwd, workspaces)) {
-          return { ...response.thread, editable: true };
+        if (response?.thread?.id === threadId) {
+          return { ...response.thread, editable: permissions.canWrite(response.thread.cwd) };
         }
       }
       const error = new Error("Saved Codex thread not found");
@@ -130,7 +166,7 @@ export function createServer({
       throw error;
     }
     const result = await bridge.request("thread/read", { threadId, includeTurns: false });
-    if (!isAllowedWorkspace(result?.thread?.cwd, workspaces)) {
+    if (!permissions.canWrite(result?.thread?.cwd)) {
       const error = new Error("Thread is outside configured workspaces");
       error.httpStatus = 403;
       throw error;
@@ -183,7 +219,56 @@ export function createServer({
         return respond(res, 200, { authenticated: true, codexReady: bridge.ready });
       }
       if (req.method === "GET" && pathname === "/api/workspaces") {
-        return respond(res, 200, { workspaces: workspaces.map(({ id, name }) => ({ id, name })) });
+        const projects = await listProjects();
+        return respond(res, 200, {
+          workspaces: projects.filter((project) => project.available)
+            .map(({ id, name, writable }) => ({ id, name, writable })),
+        });
+      }
+      if (req.method === "GET" && pathname === "/api/projects") {
+        const projects = await listProjects();
+        return respond(res, 200, {
+          projects: projects.map(({ id, name, available, writable, expiresAt, threadCount }) =>
+            ({ id, name, available, writable, expiresAt, threadCount })),
+        });
+      }
+      const permissionMatch = /^\/api\/projects\/([a-f0-9]{32})\/access$/.exec(pathname);
+      if (req.method === "POST" && permissionMatch) {
+        const body = await parseJson(req);
+        if (typeof body.enabled !== "boolean") return respond(res, 400, { error: "Invalid access setting" });
+        const projects = await listProjects();
+        const project = projects.find((item) => item.id === permissionMatch[1]);
+        if (!project) return respond(res, 404, { error: "Project is not available in Codex" });
+        const windowStart = Date.now();
+        if (body.enabled) {
+          const record = failedManagement.get(address);
+          if (record?.until > windowStart) return respond(res, 429, { error: "Too many management key attempts" });
+        }
+        const result = permissions.setWriteAccess(project.path, body.enabled, body.managementKey);
+        if (!result.ok) {
+          if (body.enabled && result.status === 403) {
+            const record = failedManagement.get(address) ?? { count: 0, until: 0 };
+            record.count++;
+            if (record.count >= 8) { record.until = windowStart + 15 * 60_000; record.count = 0; }
+            failedManagement.set(address, record);
+          }
+          return respond(res, result.status, { error: result.error });
+        }
+        failedManagement.delete(address);
+        // A revoke also attempts to stop running turns in that project.
+        // Any new turns must pass the permission check again.
+        if (!body.enabled && bridge.activeTurns.size) {
+          const saved = await listSavedThreads();
+          for (const [threadId, turnId] of bridge.activeTurns) {
+            const thread = saved.find((item) => item.id === threadId);
+            if (!thread || thread.projectId !== project.id) continue;
+            try {
+              await bridge.request("turn/interrupt", { threadId, turnId }, 5000);
+              bridge.activeTurns.delete(threadId);
+            } catch { /* Future turns remain read-only. */ }
+          }
+        }
+        return respond(res, 200, result);
       }
       if (req.method === "GET" && pathname === "/api/approvals") {
         return respond(res, 200, { approvals: bridge.pendingApprovals() });
@@ -214,12 +299,13 @@ export function createServer({
       }
       if (req.method === "POST" && pathname === "/api/threads") {
         const body = await parseJson(req);
-        const workspace = workspaces.find((item) => item.id === body.workspaceId);
-        if (!workspace) return respond(res, 400, { error: "Select an allowed workspace" });
+        const projects = await listProjects();
+        const workspace = projects.find((item) => item.id === body.workspaceId);
+        if (!workspace || !workspace.available) return respond(res, 400, { error: "Select an existing project folder" });
         const result = await bridge.request("thread/start", {
           cwd: workspace.path,
-          approvalPolicy: "on-request",
-          sandbox: "workspace-write",
+          approvalPolicy: workspace.writable ? "on-request" : "never",
+          sandbox: workspace.writable ? "workspace-write" : "read-only",
         });
         if (result?.thread?.id) bridge.loadedThreads.add(result.thread.id);
         return respond(res, 201, result);
@@ -247,7 +333,12 @@ export function createServer({
           historyUnavailable = true;
         }
         return respond(res, 200, {
-          thread: { ...thread, editable: known.editable, turns },
+          thread: {
+            ...thread,
+            projectId: permissions.projectId(thread.cwd),
+            editable: permissions.canWrite(thread.cwd),
+            turns,
+          },
           activeTurnId: bridge.activeTurns.get(threadId) ?? null,
           historyUnavailable,
         });
@@ -270,8 +361,8 @@ export function createServer({
         const result = await bridge.request("turn/start", {
           threadId,
           input: [{ type: "text", text: body.text.trim() }],
-          approvalPolicy: known.editable ? "on-request" : "never",
-          sandbox: known.editable ? "workspace-write" : "read-only",
+          approvalPolicy: permissions.canWrite(current.thread.cwd) ? "on-request" : "never",
+          sandbox: permissions.canWrite(current.thread.cwd) ? "workspace-write" : "read-only",
         });
         if (result?.turn?.id) bridge.activeTurns.set(threadId, result.turn.id);
         return respond(res, 202, result);
@@ -279,7 +370,7 @@ export function createServer({
       const stopMatch = /^\/api\/threads\/([^/]+)\/interrupt$/.exec(pathname);
       if (req.method === "POST" && stopMatch) {
         const threadId = stopMatch[1];
-        await assertAuthorizedThread(threadId);
+        await assertKnownThread(threadId);
         const turnId = bridge.activeTurns.get(threadId);
         if (!turnId) return respond(res, 409, { error: "No active turn to interrupt" });
         await bridge.request("turn/interrupt", { threadId, turnId });
@@ -316,10 +407,12 @@ async function main() {
     throw new Error("Non-loopback binding is disabled. Use a private HTTPS reverse proxy to 127.0.0.1 instead.");
   }
   const workspaces = configuredWorkspaces(ROOT);
+  const permissionManager = new ProjectPermissions({ root: ROOT, baseWorkspaces: workspaces });
+  permissionManager.ensureManagementKey();
   const accessToken = loadAccessToken(ROOT);
   const trustedHosts = (process.env.TRUSTED_HOSTS ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
   const bridge = new CodexBridge();
-  const server = createServer({ bridge, accessToken, workspaces, trustedHosts });
+  const server = createServer({ bridge, accessToken, workspaces, trustedHosts, permissionManager });
   server.listen(port, host, () => {
     console.log(`Codex Remote Web: http://${host}:${port}`);
     console.log("Access token: .local/access-token (never commit or share it)");

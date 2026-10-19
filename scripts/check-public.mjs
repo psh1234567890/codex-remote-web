@@ -26,6 +26,16 @@ if (!endpoint || !/^https:\/\/[-.a-z0-9]+\.ts\.net:10000\/$/.test(endpoint)) {
     if (app.status !== 200 || !(await app.text()).includes("Codex Remote Web")) {
       throw new Error("Authenticated app access failed");
     }
+    const projects = await fetch(endpoint + "api/projects", { headers: { Cookie: cookie } });
+    if (projects.status !== 200) throw new Error("Project permissions endpoint unavailable");
+    const list = (await projects.json()).projects;
+    if (!Array.isArray(list) || !list.length) throw new Error("No project permissions available");
+    const deniedPermission = await fetch(endpoint + "api/projects/" + list[0].id + "/access", {
+      method: "POST",
+      headers: { Cookie: cookie, Origin: origin, "X-Remote-Client": "1", "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, managementKey: "0".repeat(64) }),
+    });
+    if (deniedPermission.status !== 403) throw new Error("Wrong management key was not rejected");
     const threads = await fetch(endpoint + "api/threads", { headers: { Cookie: cookie } });
     if (threads.status !== 200) throw new Error("Authenticated API proxy failed: HTTP " + threads.status);
     const logout = await fetch(endpoint + "remote-api/logout", {

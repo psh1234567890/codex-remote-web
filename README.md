@@ -14,6 +14,13 @@
 - Send text messages in those read-only projects using a read-only Codex
   sandbox with approval policy `never`; filesystem writes remain limited
   to locally allowlisted workspaces.
+- Individually toggle project write access from Safari using a distinct
+  256-bit management key held in the PC's ignored `.local/project-management-key`.
+  Alternatively, issue a one-use, 10-minute approval code on the PC with
+  `node scripts/write-code.mjs` and enter it in the same dialog.
+  New grants expire after two hours; disabling a project persists until changed.
+  Codex still uses per-turn `workspace-write` or `read-only` sandboxing.
+  Save the management key securely on a trusted device, never in a URL or chat.
 
 The standalone `node scripts/smoke-chat.mjs` check runs one real,
 read-only Codex turn in a temporary empty project, archives its test thread,
